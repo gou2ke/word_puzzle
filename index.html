@@ -1,0 +1,2088 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>字·界</title>
+<style>
+/* ============================================================
+   字·界 —— 单文件版
+   纯原生 HTML/CSS/JS，零依赖，双击 index.html 即可运行
+   关卡全部是数据（LEVELS），引擎与配方表（CHARS）全局共用
+   ============================================================ */
+* { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+
+html, body {
+  height: 100%;
+  background: #060609;
+  overflow: hidden;
+  font-family: "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif;
+  color: #c9c9c2;
+}
+
+/* ---------- 整体舞台 ---------- */
+#stage {
+  position: fixed;
+  left: 50%; top: 50%;
+  transform-origin: center center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+#title-corner {
+  position: fixed;
+  left: 22px; top: 18px;
+  font-size: 15px;
+  color: #8d8d80;
+  letter-spacing: 2px;
+  z-index: 5;
+}
+#level-select { margin-left: 12px; }
+.lvl-btn {
+  background: transparent;
+  border: 1px solid #2c2c38;
+  color: #6a6a60;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 3px 10px;
+  margin-left: 6px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.lvl-btn:hover { color: #d8c78a; border-color: #d8c78a; }
+.lvl-btn.active { color: #d8c78a; border-color: #d8c78a; background: rgba(216, 199, 138, .1); }
+
+/* ---------- 目标条 ---------- */
+#objective-bar {
+  padding: 8px 22px;
+  background: rgba(14, 14, 20, .85);
+  border: 1px solid #2c2c38;
+  border-radius: 20px;
+  font-size: 14px;
+  letter-spacing: 1.5px;
+  color: #d8c78a;
+  transition: box-shadow .4s;
+}
+#objective-bar.flash { box-shadow: 0 0 18px rgba(216, 199, 138, .45); }
+#obj-diamond { margin-right: 8px; font-size: 12px; }
+
+/* ---------- 地图 ---------- */
+#map {
+  position: relative;
+  overflow: hidden;   /* 视野黑幕的阴影不出房间 */
+  width: 728px;   /* 13 格 × 56 */
+  height: 504px;  /* 9 格 × 56 */
+  background:
+    linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+  background-size: 56px 56px;
+  border: 1px solid #23232c;
+  box-shadow: 0 0 60px rgba(0, 0, 0, .8) inset;
+}
+
+/* ---------- 视野：房间初始全黑，行动后自主角为中心散开 ---------- */
+#vision {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  background: #000;
+  -webkit-mask-image: radial-gradient(circle var(--vr, 1px) at var(--vx, 50%) var(--vy, 50%),
+    transparent 0, transparent 62%, rgba(0, 0, 0, .55) 82%, #000 100%);
+  mask-image: radial-gradient(circle var(--vr, 1px) at var(--vx, 50%) var(--vy, 50%),
+    transparent 0, transparent 62%, rgba(0, 0, 0, .55) 82%, #000 100%);
+  transition: opacity .28s ease-out;
+}
+#vision.clear { opacity: 0; }
+
+/* 链的视野窗：只有活动范围那一块是亮的，其余由巨大阴影压黑 */
+#leash-vision {
+  position: absolute;
+  left: 0; top: 0;
+  width: 0; height: 0;
+  z-index: 40;
+  pointer-events: none;
+  box-shadow: 0 0 0 9999px #000;
+  transition: left .55s cubic-bezier(.2, .8, .3, 1),
+              top .55s cubic-bezier(.2, .8, .3, 1),
+              width .55s cubic-bezier(.2, .8, .3, 1),
+              height .55s cubic-bezier(.2, .8, .3, 1),
+              opacity .3s ease-out;
+}
+
+/* 链的活动范围地砖（在字之下） */
+.range-tile {
+  position: absolute;
+  width: 56px; height: 56px;
+  transform: translate(var(--tx, 0), var(--ty, 0));
+  background: rgba(216, 199, 138, .05);
+  box-shadow: inset 0 0 0 1px rgba(216, 199, 138, .10);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 地图上所有的“字” */
+.cell-char {
+  position: absolute;
+  left: 0; top: 0;
+  width: 56px; height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(var(--tx, 0), var(--ty, 0));
+  font-size: 24px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 场景字：灰暗、安静 */
+.cell-char.scene { color: #55555f; }
+.cell-char.grass { color: #3d4f3c; font-size: 20px; }
+
+/* 可交互实体：淡金色呼吸光 */
+.cell-char.entity {
+  color: #d8c78a;
+  animation: breathe 2.6s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%, 100% { text-shadow: 0 0 4px rgba(216,199,138,.25); }
+  50%      { text-shadow: 0 0 14px rgba(216,199,138,.75); }
+}
+
+/* 链：拴住你的字，冷白 */
+.cell-char.chain {
+  color: #c8cfd8;
+  animation: chainGlow 2.2s ease-in-out infinite;
+}
+@keyframes chainGlow {
+  0%, 100% { text-shadow: 0 0 5px rgba(180, 200, 220, .3); }
+  50%      { text-shadow: 0 0 16px rgba(180, 200, 220, .8); }
+}
+
+/* 火：红，跳动 */
+.cell-char.fire {
+  color: #ff5c3a;
+  animation: fireGlow 1.5s ease-in-out infinite;
+}
+@keyframes fireGlow {
+  0%, 100% { text-shadow: 0 0 6px rgba(255, 80, 40, .45); }
+  50%      { text-shadow: 0 0 22px rgba(255, 110, 50, .95); }
+}
+
+/* 水：无实体的背景字，踩得过去 */
+.cell-char.water {
+  z-index: 0;
+  color: rgba(126, 182, 214, .55);
+  font-size: 26px;
+  text-shadow: 0 0 14px rgba(126, 182, 214, .35);
+}
+
+/* 烧着的“木”：仍是木，只是红了 */
+.cell-char.lit-wood {
+  color: #ff6a45;
+  text-shadow: 0 0 14px rgba(255, 90, 50, .85);
+}
+
+/* 声：从墙外飞进来、一路飘散的响动 */
+.sound-fly {
+  position: absolute;
+  left: 0; top: 0;
+  z-index: 5;
+  font-size: 17px;
+  letter-spacing: 2px;
+  white-space: nowrap;
+  color: #9fb2c8;
+  text-shadow: 0 0 14px rgba(160, 190, 220, .6);
+  pointer-events: none;
+  will-change: left, top, opacity;
+}
+
+/* 放大听力后，“声”化成的一句话 */
+.whisper {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 84%;
+  transform: translate(-50%, -50%) scale(.96);
+  text-align: center;
+  font-size: 19px;
+  line-height: 1.9;
+  letter-spacing: 2px;
+  color: #c8d2e0;
+  text-shadow: 0 0 18px rgba(160, 190, 230, .55);
+  opacity: 0;
+  transition: opacity .9s ease, transform .9s ease;
+  pointer-events: none;
+  z-index: 42;
+}
+.whisper.show { opacity: .92; transform: translate(-50%, -50%) scale(1); }
+
+/* 主角的回应：一句缺了一个字的话，等玩家从行囊里挑字填进去 */
+.respond {
+  position: absolute;
+  left: 50%; top: 27%;
+  transform: translate(-50%, -50%);
+  font-size: 23px;
+  letter-spacing: 3px;
+  white-space: nowrap;
+  color: #ece5d2;
+  text-shadow: 0 0 20px rgba(210, 220, 240, .55);
+  opacity: 0;
+  transition: opacity .8s ease;
+  pointer-events: none;
+  z-index: 42;
+}
+.respond.show { opacity: .96; }
+.respond .blank {
+  display: inline-block;
+  min-width: 1.15em;
+  height: 1.15em;
+  margin: 0 2px;
+  border-bottom: 2px solid #c8b184;
+  color: #ffd27a;
+  text-align: center;
+  animation: blankPulse 1.6s ease-in-out infinite;
+}
+@keyframes blankPulse {
+  50% { border-bottom-color: #ffd27a; text-shadow: 0 0 16px rgba(255, 210, 122, .95); }
+}
+.respond.filled .blank { animation: none; border-bottom-color: transparent; }
+
+/* 门：通往下一间屋子 */
+.cell-char.door {
+  color: #c8b184;
+  animation: doorGlow 2.4s ease-in-out infinite;
+}
+@keyframes doorGlow {
+  0%, 100% { text-shadow: 0 0 6px rgba(216, 199, 138, .3); }
+  50%      { text-shadow: 0 0 22px rgba(255, 232, 170, .9); }
+}
+
+/* “死”去的字（灭）：失去碰撞、失去光泽。放在 .fire 之后，保证盖过火焰样式 */
+.cell-char.dead { color: #5a5a5a; opacity: .55; animation: none; }
+
+/* 被撞时的抖动 */
+.cell-char.shake { animation: shake .26s, breathe 2.6s ease-in-out infinite; }
+.cell-char.scene.shake { animation: shake .26s; }
+.cell-char.chain.shake { animation: shake .26s, chainGlow 2.2s ease-in-out infinite; }
+.cell-char.fire.shake { animation: shake .26s, fireGlow 1.5s ease-in-out infinite; }
+@keyframes shake {
+  25% { transform: translate(calc(var(--tx) + 3px), var(--ty)); }
+  50% { transform: translate(calc(var(--tx) - 3px), var(--ty)); }
+  75% { transform: translate(calc(var(--tx) + 2px), var(--ty)); }
+}
+
+/* 草被踩过的晃动 */
+.cell-char.rustle { animation: rustle .5s; }
+@keyframes rustle {
+  30% { transform: translate(var(--tx), var(--ty)) rotate(12deg); color: #5c7a50; }
+}
+
+/* 合成时的白闪 */
+.cell-char.flash { animation: flash .45s; }
+@keyframes flash {
+  30% { color: #ffffff; text-shadow: 0 0 30px #fff, 0 0 60px #ffd27a; transform: translate(var(--tx), var(--ty)) scale(1.35); }
+}
+
+/* 对话框聚焦的实体 */
+.cell-char.focus { color: #ffe9a8; text-shadow: 0 0 18px rgba(255, 220, 140, .9); }
+
+/* ---------- 主角“我” ---------- */
+#player {
+  z-index: 41;   /* 高于全黑视野层：黑暗里唯独“我”可见 */
+  font-size: 27px;
+  color: #f4f4f4;
+  text-shadow: 0 0 16px rgba(255, 255, 255, .65);
+  transition: transform .13s ease-out;
+}
+/* 手持物：主角右上角的小字 */
+#held-char {
+  position: absolute;
+  right: -6px; top: -6px;
+  font-size: 15px;
+  color: #d8c78a;
+  text-shadow: 0 0 8px rgba(216, 199, 138, .8);
+  animation: breathe 2s ease-in-out infinite;
+}
+#held-char.lit {
+  color: #ff6a45;
+  text-shadow: 0 0 12px rgba(255, 90, 50, .95);
+}
+
+/* ---------- 叙述栏 ---------- */
+#narrative {
+  width: 728px;
+  min-height: 66px;
+  padding: 12px 18px;
+  border-left: 2px solid #3a3a46;
+  background: rgba(12, 12, 17, .6);
+  font-size: 15px;
+  line-height: 1.8;
+  letter-spacing: 1px;
+  color: #b9b9ae;
+}
+#narr-diamond { color: #6a6a75; margin-right: 8px; font-size: 12px; }
+#type-cursor { color: #6a6a75; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ---------- 左下按键提示 ---------- */
+#keys-hint {
+  position: fixed;
+  left: 22px; bottom: 18px;
+  font-size: 12px;
+  color: #4c4c46;
+  letter-spacing: 1.5px;
+  z-index: 5;
+}
+#keys-hint b { color: #7c7c72; font-weight: normal; }
+
+/* ---------- 背包按钮 ---------- */
+#bag-btn {
+  position: fixed;
+  right: 26px; bottom: 22px;
+  padding: 10px 20px;
+  background: rgba(16, 16, 22, .92);
+  border: 1px solid #3a3a46;
+  border-radius: 4px;
+  font-size: 14px;
+  letter-spacing: 3px;
+  color: #b9b9ae;
+  cursor: pointer;
+  z-index: 40;
+  transition: border-color .2s;
+}
+#bag-btn:hover { border-color: #d8c78a; }
+#bag-btn .key {
+  font-size: 11px;
+  color: #6a6a60;
+  border: 1px solid #3a3a46;
+  padding: 1px 6px;
+  margin-left: 6px;
+  border-radius: 3px;
+}
+#bag-count {
+  position: absolute;
+  top: -8px; left: -8px;
+  min-width: 18px; height: 18px;
+  border-radius: 9px;
+  background: #d8c78a;
+  color: #111;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+#bag-count:empty { display: none; }
+#bag-btn.pop { animation: pop .4s; }
+@keyframes pop { 40% { transform: scale(1.12); } }
+
+/* ---------- 背包面板 ---------- */
+/* 行囊：场景右侧的常驻侧栏（不遮挡地图） */
+#bag-panel {
+  position: absolute;
+  left: calc(100% + 14px);
+  top: 51px;
+  width: 300px;
+  max-height: 504px;
+  overflow-y: auto;
+  background: rgba(10, 10, 14, .95);
+  border: 1px solid #3a3a46;
+  box-shadow: 0 0 60px rgba(0, 0, 0, .85);
+  padding: 18px 16px 14px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(10px);
+  transition: opacity .2s, transform .2s;
+}
+#bag-panel.show { opacity: 1; pointer-events: auto; transform: none; }
+#bag-title {
+  text-align: center;
+  font-size: 15px;
+  letter-spacing: 8px;
+  color: #d8c78a;
+  margin-bottom: 14px;
+}
+#bag-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  min-height: 60px;
+}
+.bag-slot {
+  height: 60px;
+  border: 1px solid #2c2c38;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  color: #e8e2cc;
+  cursor: pointer;
+  position: relative;
+  transition: border-color .15s, background .15s;
+}
+.bag-slot:hover { border-color: #d8c78a; background: rgba(216, 199, 138, .06); }
+.bag-slot.held { border-color: #d8c78a; box-shadow: 0 0 12px rgba(216, 199, 138, .35) inset; }
+.bag-slot.held::after {
+  content: "手";
+  position: absolute;
+  right: 2px; top: 2px;
+  font-size: 10px;
+  color: #d8c78a;
+}
+.bag-slot.lit {
+  color: #ff6a45;
+  border-color: rgba(255, 106, 69, .45);
+  text-shadow: 0 0 12px rgba(255, 90, 50, .7);
+}
+/* 填空：行囊里每个字都亮起来，等玩家挑一个填进那句话 */
+.bag-slot.fillable {
+  border-color: #c8b184;
+  animation: slotPulse 1.5s ease-in-out infinite;
+}
+@keyframes slotPulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(200, 177, 132, 0); }
+  50%      { box-shadow: 0 0 16px rgba(200, 177, 132, .7), 0 0 10px rgba(200, 177, 132, .35) inset; }
+}
+#bag-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: #4c4c46;
+  font-size: 13px;
+  letter-spacing: 4px;
+  padding: 22px 0;
+}
+#bag-tip {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: #55554e;
+  letter-spacing: 2px;
+}
+
+/* ---------- 交互对话框 ---------- */
+#dialog {
+  position: fixed;
+  display: none;
+  z-index: 70;
+  background: rgba(10, 10, 15, .97);
+  border: 1px solid #4a4231;
+  box-shadow: 0 0 40px rgba(0, 0, 0, .85), 0 0 18px rgba(216, 199, 138, .12);
+  padding: 16px 18px;
+  width: 168px;
+}
+#dlg-char {
+  text-align: center;
+  font-size: 40px;
+  color: #ffe9a8;
+  text-shadow: 0 0 16px rgba(255, 220, 140, .6);
+  margin-bottom: 4px;
+}
+#dlg-sub {
+  text-align: center;
+  font-size: 11px;
+  color: #6a6a60;
+  letter-spacing: 2px;
+  margin-bottom: 12px;
+}
+.dlg-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 10px;
+  background: transparent;
+  border: 1px solid #3a3a46;
+  color: #d8d2bd;
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: 4px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+  position: relative;
+  text-align: center;
+}
+.dlg-btn:hover:not(:disabled) { border-color: #d8c78a; background: rgba(216, 199, 138, .08); }
+.dlg-btn:disabled { color: #4c4c46; cursor: not-allowed; border-color: #26262e; }
+.dlg-btn .key {
+  position: absolute;
+  right: 6px; top: 7px;
+  font-size: 10px;
+  color: #6a6a60;
+  letter-spacing: 0;
+}
+.dlg-btn .why {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #55554e;
+  margin-top: 3px;
+}
+
+/* ---------- 拆解全屏动画 ---------- */
+#overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 3, 6, .92);
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .35s;
+}
+#overlay.show { opacity: 1; pointer-events: auto; }
+#dis-stage { position: relative; height: 220px; display: flex; align-items: center; justify-content: center; }
+#dis-big {
+  font-size: 150px;
+  color: #fff;
+  text-shadow: 0 0 40px rgba(255, 255, 255, .55);
+  transition: opacity .18s, transform .18s;
+}
+#dis-big.crack { opacity: 0; transform: scale(1.15); }
+.dis-part {
+  position: absolute;
+  left: 50%; top: 50%;
+  font-size: 92px;
+  color: #ffe9a8;
+  text-shadow: 0 0 26px rgba(255, 220, 140, .75);
+  opacity: 0;
+}
+#dis-caption {
+  position: absolute;
+  bottom: 16%;
+  width: 100%;
+  text-align: center;
+  font-size: 13px;
+  letter-spacing: 6px;
+  color: #6a6a60;
+}
+
+/* ---------- 飞行字符（拾取 / 拆解入包 / 合成 / 放下） ---------- */
+.fly-char {
+  position: fixed;
+  z-index: 100;
+  font-size: 26px;
+  color: #ffe9a8;
+  text-shadow: 0 0 14px rgba(255, 220, 140, .8);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+/* ---------- 被火烧死 ---------- */
+#death-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: radial-gradient(circle at 50% 56%, rgba(96, 14, 6, .94), rgba(4, 2, 2, .985) 70%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 1.2s ease;
+}
+#death-overlay.show { opacity: 1; pointer-events: auto; }
+.death-fire {
+  font-size: 120px;
+  color: #ff4a2a;
+  text-shadow: 0 0 44px rgba(255, 70, 30, .9);
+  animation: fireGlow 1.2s ease-in-out infinite;
+}
+.death-text {
+  font-size: 17px;
+  letter-spacing: 4px;
+  color: #c9c9c2;
+}
+.death-hint {
+  font-size: 13px;
+  letter-spacing: 3px;
+  color: #8d8d80;
+  margin-top: 6px;
+}
+
+/* ---------- 切关黑幕 ---------- */
+#fade {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .42s;
+}
+#fade.show { opacity: 1; pointer-events: auto; }
+</style>
+</head>
+<body>
+
+<div id="title-corner">字·界<span id="level-select"></span></div>
+
+<div id="stage">
+  <div id="objective-bar"><span id="obj-diamond">◈</span><span id="objective-text">……</span></div>
+  <div id="map"><div id="vision"></div><div id="leash-vision"></div></div>
+  <div id="bag-panel">
+    <div id="bag-title">行 囊</div>
+    <div id="bag-grid"></div>
+    <div id="bag-tip">左键手持 · 右键放下 · G 放下手持</div>
+  </div>
+  <div id="narrative"><span id="narr-diamond">◆</span><span id="narrative-text"></span><span id="type-cursor">▍</span></div>
+</div>
+
+<div id="keys-hint"><b>W A S D</b> 移动 · <b>F</b> 行囊 · <b>G</b> 放下 · <b>R</b> 重开 · <b>1 / 2</b> 选择 · <b>Esc</b> 关闭</div>
+
+<div id="bag-btn"><span id="bag-count"></span>行囊<span class="key">F</span></div>
+
+<div id="dialog">
+  <div id="dlg-char">一</div>
+  <div id="dlg-sub">它在等你</div>
+  <button class="dlg-btn" id="btn-dismantle">拆解<span class="key">1</span></button>
+  <button class="dlg-btn" id="btn-pickup">拾取<span class="key">2</span></button>
+  <button class="dlg-btn" id="btn-leave">离开<span class="key">Esc</span></button>
+</div>
+
+<div id="overlay">
+  <div id="dis-stage">
+    <div id="dis-big"></div>
+    <div id="dis-caption">拆 解</div>
+  </div>
+</div>
+
+<div id="death-overlay">
+  <div class="death-fire">火</div>
+  <div class="death-text">整间屋子，烧了起来。</div>
+  <div class="death-hint">我，没了。　按 R 重来</div>
+</div>
+
+<div id="fade"></div>
+
+<script>
+/* ============================================================
+   一、常量
+   ============================================================ */
+const CELL = 56;
+let COLS = 0, ROWS = 0;
+
+/* ============================================================
+   二、字的全局档案（配方表）
+   地图里每一个汉字都按字符查这张表——所以配方天然是全局的。
+   kind: scene 非交互场景字 / entity 可交互实体字
+   ============================================================ */
+const CHARS = {
+  '墙': { kind: 'scene', solid: true },
+  '草': { kind: 'scene', solid: false, grass: true },
+  '树': { kind: 'scene', solid: true },
+
+  '一': { kind: 'entity', solid: true, sub: '它在等你',
+         pickable: true,
+         dismantle: null, dismantleWhy: '独体字，拆无可拆' },
+  '火': { kind: 'entity', solid: true, cls: 'fire', hot: true, sub: '它烧得正旺',
+         pickable: false, pickableWhy: '火，拿不住',
+         dismantle: null, dismantleWhy: '火，拆不开',
+         combine: { '一': '灭', '木': { action: 'ignite' } } },
+  '明': { kind: 'entity', solid: true, sub: '它沉在暗处',
+         pickable: false, pickableWhy: '太大了，拿不动',
+         dismantle: ['日', '月'] },
+
+  '链': { kind: 'entity', solid: true, chain: true, sub: '它拴着你',
+         pickable: false, pickableWhy: '钉死在墙上',
+         dismantle: null, dismantleWhy: '徒手扯不开',
+         combine: { '斧': { action: 'break', parts: ['钅', '辶', '车'], release: true,
+                     narr: '“斧”落，“链”断——碎成了“钅”“辶”“车”，都进了行囊。你自由了。' } },
+         /* 三部件不能一步拼回：先车+辶成“连”，再钅+连成“链” */
+         assemble: [['钅', '连', '链']] },
+  '连': { kind: 'entity', solid: true, sub: '“车”驮着“辶”',
+         pickable: true,
+         dismantle: ['车', '辶'] },
+  '斧': { kind: 'entity', solid: true, sub: '它躺在地上',
+         pickable: true,
+         dismantle: ['父', '斤'] },
+  '桌': { kind: 'entity', solid: true, sub: '它立在屋中',
+         pickable: false, pickableWhy: '太大了，拿不动',
+         dismantle: null, dismantleWhy: '徒手掰不散',
+         combine: { '斧': { action: 'break', parts: ['占', '一', '木'],
+                     narr: '“斧”落，“桌”散——劈成了“占”“一”“木”，都进了行囊。' } } },
+  '石': { kind: 'entity', solid: true, sub: '它一声不吭',
+         pickable: true,
+         dismantle: null, dismantleWhy: '浑然一块，没有缝隙',
+         strike: { with: '斧', hits: 3, spawn: '火' } },   // 斧击三下，石上生火
+
+  '冰': { kind: 'entity', solid: true, sub: '它冷得发白，边缘挂着水汽',
+         pickable: false, pickableWhy: '冰，搬不动',
+         dismantle: null, dismantleWhy: '冰，一拆就碎',
+         combine: { '木': { action: 'melt' } } },
+  '口': { kind: 'entity', solid: true, sub: '一个空空的“口”',
+         pickable: true,
+         dismantle: null, dismantleWhy: '口，拆不开' },
+  '困': { kind: 'entity', solid: true, sub: '“木”被四面围住了',
+         pickable: true,
+         dismantle: ['木', '口'] },
+  '听': { kind: 'entity', solid: true, sub: '它能听见墙里的动静',
+         pickable: true,
+         dismantle: ['口', '斤'] },
+
+  '门': { kind: 'entity', solid: true, cls: 'door', portal: true, sub: '门后是另一间屋子',
+         pickable: false, pickableWhy: '门不是拿来拿的',
+         dismantle: null, dismantleWhy: '门，拆不开' },
+};
+
+/* 由配方表推导“合体”配方：
+   只收录能拼成真字的组合。多部件字通过中间字分步拼回
+   （如 车+辶→连，钅+连→链），拼不成字的组合不会留下任何中间产物。 */
+const ASSEMBLIES = [];
+for (const [ch, def] of Object.entries(CHARS)) {
+  if (Array.isArray(def.assemble)) {
+    for (const [a, b, result] of def.assemble) {
+      ASSEMBLIES.push({ parts: [a, b], sorted: [a, b].sort().join(''), result });
+    }
+    continue;   // 显式声明了分步路径，不再从劈开部件反推
+  }
+  const sets = [];
+  if (Array.isArray(def.dismantle)) sets.push(def.dismantle);
+  if (def.combine) {
+    for (const k in def.combine) {
+      const r = def.combine[k];
+      if (r && r.action === 'break' && Array.isArray(r.parts)) sets.push(r.parts);
+    }
+  }
+  for (const parts of sets) {
+    if (parts.length !== 2) continue;   // 三件套没有两步合成路径，不提供逆向配方
+    ASSEMBLIES.push({ parts, sorted: parts.slice().sort().join(''), result: ch });
+  }
+}
+
+/* ============================================================
+   三、关卡数据（纯数据：地图 + 文案 + 可选的引导步骤）
+   地图里每个汉字就是一格：我 = 主角，. = 空地
+   ============================================================ */
+const STEPS = [
+  { key: 'move',      flag: 'moved',      objective: '走两步（W / A / S / D）',
+    enter: '你是“我”，一个字。这个世界由字构成，你也是。W、A、S、D——走两步。' },
+  { key: 'bump',      flag: 'bumped',     objective: '撞一撞那棵“树”',
+    enter: '很好。前方有一棵“树”。走过去，用身体撞它。' },
+  { key: 'pickup',    flag: 'picked',     objective: '撞向地上的“一”',
+    enter: '没有回应。“树”是场景字——它只是站在那里，风景不与你交谈。再看左下方，地上躺着一个“一”。它不一样，它在等你。撞上去。' },
+  { key: 'openbag',   flag: 'opened',     objective: '按 F 打开行囊',
+    enter: '“一”现在是你的了。按 F，行囊会在场景右侧展开——再按一次，就收起来。' },
+  { key: 'hold',      flag: 'held',       objective: '点击“一”，把它拿在手上',
+    enter: '这就是行囊，你拾起的一切都在这。点一下“一”，把它拿在手上——手里拿着什么，撞上字时，便会用上什么。' },
+  { key: 'combine',   flag: 'combined',   objective: '手持“一”，撞向“火”',
+    enter: '拿好了。右上方有一团“火”。拿着“一”，撞上去。' },
+  { key: 'pass',      flag: 'passed',     objective: '穿过“灭”，走过去',
+    enter: '“一”压住了“火”——火熄了，成了“灭”。字与字相撞，会生出新的字，这是这个世界的法则。而“灭”已经死了，死去的字拦不住你。走过去。' },
+  { key: 'dismantle', flag: 'dismantled', objective: '撞向“明”，选择「拆解」',
+    enter: '看见了吗，失去力量的字连阻拦你都做不到。下方还有一个“明”——它太大，拿不动，但合体字皆可拆。撞上去，选「拆解」。' },
+  { key: 'drop',      flag: 'dropped',    objective: '右键行囊里的“日”，把它放到地上',
+    enter: '行囊里的字，对着它点右键，就能放到地上——按 G 则是放下手里那个。试试把“日”放下。' },
+  { key: 'rejoin',    flag: 'rejoined',   objective: '手持“月”，撞向地上的“日”',
+    enter: '拆得开，也拼得回。点一下行囊里的“月”，把它拿在手上，再去撞地上的“日”——部件相撞，会重新长回原来的字。' },
+  { key: 'done',      flag: null,         objective: '撞向右墙的“门”，走进「空屋」',
+    spawn: { char: '门', x: 12, y: 4 },
+    enter: '就在这时，右墙一声闷响，裂出了一道“门”。撞上去，到另一间屋子去。' },
+];
+
+const LEVELS = [
+  {
+    short: '引导',
+    title: '引 导',
+    map: [
+      '墙墙墙墙墙墙墙墙墙墙墙墙墙',
+      '墙..草....草...墙',
+      '墙.我....树....墙',
+      '墙..草....火.草.墙',
+      '墙.....草.....墙',
+      '墙.一....草....墙',
+      '墙..草..明...草.墙',
+      '墙.....草..草..墙',
+      '墙墙墙墙墙墙墙墙墙墙墙墙墙',
+    ],
+    steps: STEPS,
+  },
+  {
+    short: '空屋',
+    title: '空 屋',
+    map: [
+      '墙墙墙墙墙墙墙墙墙墙墙墙墙',
+      '墙链斧........冰墙',
+      '墙我..........墙',
+      '墙...........墙',
+      '墙...........墙',
+      '墙......桌....墙',
+      '墙...........墙',
+      '墙.........石.墙',
+      '墙墙墙墙墙墙墙墙墙墙墙墙墙',
+    ],
+    intro: '空屋。四壁是“墙”，四壁之外，还是“墙”。屋里什么都没有——除了一把“斧”、一张“桌”、一块“石”，和角落里一块化不开的“冰”。还有墙角那条“链”：它拴着你，你的全部世界，只有这四格。',
+  },
+];
+
+const NARR = {
+  sceneFirst: '没有回应。场景的字只是站在那里——它们是这个世界的天与地，不与你交谈，也不为你让路。',
+  entityFirst: '它等着你。这样的字是“可交互”的——面对它，你有选择。',
+  hot: '“火”静静地烧着。空着手，你不该碰它。',
+  hotHeld: c => `手持“${c}”撞向“火”——什么也没发生。也许，该换样东西。`,
+  leash: '“链”猛地绷紧，把你拽了回来——这几格之外，你哪儿也去不了。',
+};
+
+/* ============================================================
+   四、运行时状态
+   ============================================================ */
+const state = {
+  levelIndex: 0,
+  level: null,
+  player: { x: 0, y: 0, held: null, facing: { dx: 0, dy: 1 } },
+  entities: new Map(),   // "x,y" -> entity
+  bag: [],
+  leash: null,           // { x1, y1, x2, y2 } 活动范围（矩形，含边界）
+  step: 0,
+  flags: {},
+  moveCount: 0,
+  dialogFor: null,
+  bagOpen: false,
+  animating: false,
+  visionOpened: false,
+  dead: false,
+  fireSpreading: false,
+  waterCells: new Set(),   // 水所在的格子，火蔓延不进去
+};
+
+/* DOM 引用 */
+const $ = id => document.getElementById(id);
+const mapEl = $('map'), playerEl = document.createElement('div');
+const narrativeText = $('narrative-text'), objectiveText = $('objective-text');
+const dialogEl = $('dialog'), bagPanel = $('bag-panel'), bagBtn = $('bag-btn');
+
+/* ============================================================
+   五、工具函数
+   ============================================================ */
+const key = (x, y) => x + ',' + y;
+const entityAt = (x, y) => state.entities.get(key(x, y));
+
+function setPos(el, gx, gy) {
+  el.style.setProperty('--tx', (gx * CELL) + 'px');
+  el.style.setProperty('--ty', (gy * CELL) + 'px');
+}
+
+/* 动画计时器：切关时统一清掉，避免旧关卡的延时回调污染新关卡 */
+const timers = new Set();
+function later(fn, ms) {
+  const id = setTimeout(() => { timers.delete(id); fn(); }, ms);
+  timers.add(id);
+  return id;
+}
+function clearTimers() {
+  timers.forEach(clearTimeout);
+  timers.clear();
+}
+
+/* 打字机叙述 */
+let typeTimer = null;
+function narrate(text) {
+  clearInterval(typeTimer);
+  narrativeText.textContent = '';
+  let i = 0;
+  typeTimer = setInterval(() => {
+    i++;
+    narrativeText.textContent = text.slice(0, i);
+    if (i >= text.length) clearInterval(typeTimer);
+  }, 32);
+}
+
+/* 简易音效（Web Audio 合成，无外部资源） */
+let AC = null;
+function initAudio() { if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } }
+function tone(freq, dur = .08, type = 'sine', gain = .04, delay = 0) {
+  if (!AC) return;
+  const t = AC.currentTime + delay;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  o.connect(g); g.connect(AC.destination);
+  o.start(t); o.stop(t + dur + .02);
+}
+const sfx = {
+  move:      () => tone(180, .05, 'triangle', .028),
+  bump:      () => tone(92,  .09, 'sawtooth', .032),
+  pickup:    () => { tone(520, .07, 'sine', .05); tone(784, .12, 'sine', .05, .07); },
+  dismantle: () => { tone(300, .12, 'triangle', .05); tone(430, .12, 'triangle', .05, .13); tone(650, .2, 'triangle', .05, .26); },
+  combine:   () => { tone(240, .1, 'sine', .05); tone(360, .14, 'sine', .05, .09); tone(540, .22, 'sine', .05, .18); },
+  open:      () => tone(440, .05, 'sine', .03),
+  strike:    n => { tone(280 + n * 100, .07, 'square', .035); tone(1000, .05, 'sine', .02, .05); },
+  fire:      () => { tone(150, .32, 'sawtooth', .03); tone(320, .2, 'sine', .025, .06); },
+};
+
+/* ============================================================
+   六、关卡装载
+   ============================================================ */
+function buildMap() {
+  const MAP = state.level.map;
+  ROWS = MAP.length;
+  COLS = MAP[0].length;
+
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      const ch = MAP[y][x];
+      if (ch === '.') continue;
+      if (ch === '我') { state.player.x = x; state.player.y = y; continue; }
+
+      const def = CHARS[ch] || { kind: 'scene', solid: true };
+      const el = document.createElement('div');
+      el.className = 'cell-char ' +
+        (def.kind === 'scene' ? (def.grass ? 'grass' : 'scene') : (def.chain ? 'chain' : 'entity')) +
+        (def.cls ? ' ' + def.cls : '');
+      el.textContent = ch;
+      setPos(el, x, y);
+      mapEl.appendChild(el);
+      state.entities.set(key(x, y), { char: ch, x, y, kind: def.kind, solid: def.solid, def, el });
+
+      if (def.chain) state.leash = { x1: x, y1: y, x2: x + 1, y2: y + 1 };   // 链为左上角的 2×2 牢笼
+    }
+  }
+
+  playerEl.id = 'player';
+  playerEl.className = 'cell-char';
+  playerEl.style.transition = 'transform .13s ease-out';
+  playerEl.innerHTML = '我<span id="held-char"></span>';
+  setPos(playerEl, state.player.x, state.player.y);
+  mapEl.appendChild(playerEl);
+}
+
+function renderLeash() {
+  mapEl.querySelectorAll('.range-tile').forEach(t => t.remove());
+  if (!state.leash) return;
+  const L = state.leash;
+  for (let gy = Math.max(1, L.y1); gy <= Math.min(ROWS - 2, L.y2); gy++) {
+    for (let gx = Math.max(1, L.x1); gx <= Math.min(COLS - 2, L.x2); gx++) {
+      const t = document.createElement('div');
+      t.className = 'range-tile';
+      setPos(t, gx, gy);
+      mapEl.appendChild(t);
+    }
+  }
+}
+
+/* ---------- 视野：进房全黑，主角做出任意行动后自他为中心散开 ---------- */
+let visionRaf = null;
+
+function resetVision() {
+  cancelAnimationFrame(visionRaf);
+  const v = $('vision'), lw = $('leash-vision');
+  v.classList.remove('clear');
+  v.style.setProperty('--vx', ((state.player.x + .5) * CELL) + 'px');
+  v.style.setProperty('--vy', ((state.player.y + .5) * CELL) + 'px');
+  v.style.setProperty('--vr', '1px');
+  state.visionOpened = false;
+
+  if (state.leash) {
+    /* 被链拴住：改用矩形视野窗，先缩成主角身上的一点 */
+    v.style.display = 'none';
+    lw.style.transition = 'none';
+    lw.style.display = 'block';
+    lw.style.opacity = '1';
+    lw.style.left = ((state.player.x + .5) * CELL - 1) + 'px';
+    lw.style.top = ((state.player.y + .5) * CELL - 1) + 'px';
+    lw.style.width = '2px';
+    lw.style.height = '2px';
+    void lw.offsetWidth;      // 让初始位置立即生效，再恢复过渡
+    lw.style.transition = '';
+  } else {
+    v.style.display = 'block';
+    lw.style.display = 'none';
+  }
+}
+
+function openVision() {
+  if (!state.level || state.visionOpened) return;
+  state.visionOpened = true;
+
+  /* 链还在：视野只散开到活动范围那四格 */
+  if (state.leash) {
+    const L = state.leash, lw = $('leash-vision');
+    lw.style.left = (L.x1 * CELL) + 'px';
+    lw.style.top = (L.y1 * CELL) + 'px';
+    lw.style.width = ((L.x2 - L.x1 + 1) * CELL) + 'px';
+    lw.style.height = ((L.y2 - L.y1 + 1) * CELL) + 'px';
+    return;
+  }
+
+  const v = $('vision');
+  v.style.setProperty('--vx', ((state.player.x + .5) * CELL) + 'px');
+  v.style.setProperty('--vy', ((state.player.y + .5) * CELL) + 'px');
+
+  const maxR = Math.hypot(COLS * CELL, ROWS * CELL) * 1.05;
+  const t0 = performance.now(), dur = 560;
+  const tick = now => {
+    const p = Math.min(1, (now - t0) / dur);
+    const e = 1 - Math.pow(1 - p, 3);   // 先快后慢
+    v.style.setProperty('--vr', (maxR * e).toFixed(1) + 'px');
+    if (p < 1) visionRaf = requestAnimationFrame(tick);
+    else v.classList.add('clear');
+  };
+  visionRaf = requestAnimationFrame(tick);
+}
+
+/* 链断：视野窗从活动范围扩到整间屋子，随后撤掉黑幕 */
+function expandVisionToRoom() {
+  const lw = $('leash-vision');
+  if (lw.style.display === 'none') return;
+  lw.style.left = '0px';
+  lw.style.top = '0px';
+  lw.style.width = (COLS * CELL) + 'px';
+  lw.style.height = (ROWS * CELL) + 'px';
+  later(() => {
+    lw.style.opacity = '0';
+    later(() => { lw.style.display = 'none'; }, 320);
+  }, 560);
+}
+
+function loadLevel(i) {
+  clearTimers();
+  clearInterval(typeTimer);
+  document.querySelectorAll('.fly-char').forEach(el => el.remove());
+  mapEl.querySelectorAll('.whisper, .sound-fly, .respond').forEach(el => el.remove());
+  $('overlay').classList.remove('show');
+  $('death-overlay').classList.remove('show');
+  $('dis-stage').querySelectorAll('.dis-part').forEach(p => p.remove());
+  closeDialog();
+
+  const lv = LEVELS[i];
+  state.levelIndex = i;
+  state.level = lv;
+  state.player = { x: 0, y: 0, held: null, facing: { dx: 0, dy: 1 } };
+  state.entities = new Map();
+  state.bag = [];
+  state.leash = null;
+  state.flags = {};
+  state.step = 0;
+  state.moveCount = 0;
+  state.animating = false;
+  state.dead = false;
+  state.fireSpreading = false;
+  state.waterCells = new Set();
+
+  mapEl.querySelectorAll('.cell-char, .range-tile').forEach(el => el.remove());
+  renderLevelSelect();
+
+  buildMap();
+  resetVision();
+  renderLeash();
+  renderBag();
+
+  if (lv.steps) {
+    setStep(0);
+  } else {
+    objectiveText.textContent = lv.title || lv.name || '';
+    narrate(lv.intro || '');
+  }
+}
+
+let switching = false;
+function gotoLevel(i) {
+  if (switching) return;
+  switching = true;
+  const fade = $('fade');
+  fade.classList.add('show');
+  setTimeout(() => {
+    loadLevel(i);
+    fade.classList.remove('show');
+    switching = false;
+  }, 430);
+}
+
+/* 左上角选关 */
+function renderLevelSelect() {
+  const box = $('level-select');
+  box.innerHTML = '';
+  LEVELS.forEach((lv, i) => {
+    const b = document.createElement('button');
+    b.className = 'lvl-btn' + (i === state.levelIndex ? ' active' : '');
+    b.textContent = lv.short;
+    b.onclick = () => {
+      initAudio();
+      if (i !== state.levelIndex) gotoLevel(i);
+    };
+    box.appendChild(b);
+  });
+}
+
+/* ============================================================
+   七、引导步骤（软引导：允许超前完成，到达时自动跳过）
+   ============================================================ */
+function completeStep(stepKey) {
+  const steps = state.level && state.level.steps;
+  if (!steps) return;
+  const idx = steps.findIndex(s => s.key === stepKey);
+  if (idx < 0) return;
+  if (steps[idx].flag) state.flags[steps[idx].flag] = true;
+  if (state.step === idx) setStep(idx + 1);
+}
+
+function setStep(i) {
+  const steps = state.level.steps;
+  while (i < steps.length - 1 && steps[i].flag && state.flags[steps[i].flag]) i++;
+  state.step = Math.min(i, steps.length - 1);
+  const s = steps[state.step];
+  objectiveText.textContent = s.objective;
+  const bar = $('objective-bar');
+  bar.classList.remove('flash'); void bar.offsetWidth; bar.classList.add('flash');
+  narrate(s.enter);
+  if (s.spawn) spawnStepEntity(s.spawn);
+}
+
+/* 步骤触发的场景变化（例如教程结束时墙上裂出一道门） */
+function spawnStepEntity(cfg) {
+  const f = 'spawned:' + cfg.char;
+  if (state.flags[f]) return;
+  state.flags[f] = true;
+
+  const old = entityAt(cfg.x, cfg.y);
+  if (old) removeEntity(old);          // 覆盖墙体
+  const ent = spawnCharEntity(cfg.char, cfg.x, cfg.y);
+  popIn(ent, cfg.x, cfg.y);
+  sfx.combine();
+}
+
+/* ============================================================
+   八、移动与撞击
+   ============================================================ */
+function tryMove(dx, dy) {
+  if (state.animating || state.dialogFor) return;
+  state.player.facing = { dx, dy };   // 记住朝向，放下时优先放在身前
+  const nx = state.player.x + dx, ny = state.player.y + dy;
+  if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) return;
+
+  /* 链的限制：超出活动矩形，空气墙 */
+  if (state.leash) {
+    const L = state.leash;
+    if (nx < L.x1 || nx > L.x2 || ny < L.y1 || ny > L.y2) {
+      bumpFx(dx, dy, null);
+      if (!state.flags.leashHinted) {
+        state.flags.leashHinted = true;
+        narrate(NARR.leash);
+      }
+      return;
+    }
+  }
+
+  const target = entityAt(nx, ny);
+  if (target) {
+    if (!target.solid) {            // 可穿过的字（草、灭）
+      movePlayer(nx, ny, target);
+      return;
+    }
+    bumpFx(dx, dy, target);
+    if (target.kind === 'scene') { onBumpScene(target); return; }
+    if (target.def.portal) { gotoLevel(state.levelIndex + 1); return; }
+
+    /* 可交互实体：手持物配方 > 击打 > 合体 > 火 > 对话框 */
+    const held = state.player.held;
+    if (held && target.def.combine && target.def.combine[held]) {
+      const res = target.def.combine[held];
+      if (typeof res === 'string') combineChars(held, target, res);
+      else if (res.action === 'break') breakWithAxe(target, res);
+      else if (res.action === 'ignite') igniteWood(held, target, res);
+      else if (res.action === 'melt') meltIce(held, target);
+      return;
+    }
+    if (held && target.def.strike && target.def.strike.with === held) {
+      strikeEntity(target);
+      return;
+    }
+    if (held && tryAssemble(held, target)) return;
+    if (target.def.hot) {
+      narrate(held ? NARR.hotHeld(held) : NARR.hot);
+      return;
+    }
+    openDialog(target);
+    return;
+  }
+  movePlayer(nx, ny, null);
+}
+
+function movePlayer(nx, ny, underEntity) {
+  state.player.x = nx; state.player.y = ny;
+  setPos(playerEl, nx, ny);
+  sfx.move();
+  state.moveCount++;
+  if (state.moveCount >= 4) completeStep('move');
+
+  if (underEntity) {
+    if (underEntity.def.grass) {
+      underEntity.el.classList.remove('rustle');
+      void underEntity.el.offsetWidth;
+      underEntity.el.classList.add('rustle');
+    }
+    if (underEntity.char === '灭') completeStep('pass');   // 穿过灭
+  }
+
+  /* 左下角：带着“听”才听得见；空着手，只有一片听不见的动静 */
+  if (nx === 1 && ny === ROWS - 2) {
+    if (state.player.held === '听') amplifyHearing();
+    else {
+      const now = Date.now();
+      if (now - (state.flags.cornerHintAt || 0) > 4000) {   // 反复进出不刷屏
+        state.flags.cornerHintAt = now;
+        narrate('听不见……墙里明明有声音，我却什么也听不清。');
+      }
+    }
+  }
+}
+
+/* 撞击动画：主角顶一下 + 目标字抖动 */
+function bumpFx(dx, dy, target) {
+  sfx.bump();
+  playerEl.style.transition = 'transform .05s';
+  setPos(playerEl, state.player.x + dx * .16, state.player.y + dy * .16);
+  later(() => {
+    setPos(playerEl, state.player.x, state.player.y);
+    later(() => playerEl.style.transition = 'transform .13s ease-out', 60);
+  }, 60);
+  if (target) {
+    target.el.classList.remove('shake');
+    void target.el.offsetWidth;
+    target.el.classList.add('shake');
+  }
+}
+
+function onBumpScene() {
+  if (!state.flags.sceneExplained) {
+    state.flags.sceneExplained = true;
+    narrate(NARR.sceneFirst);
+  }
+  completeStep('bump');
+}
+
+/* ============================================================
+   九、对话框（拆解 / 拾取 / 离开）
+   ============================================================ */
+function openDialog(entity) {
+  state.dialogFor = entity;
+  entity.el.classList.add('focus');
+  $('dlg-char').textContent = entity.char;
+  $('dlg-sub').textContent = entity.def.sub || '它在等你';
+
+  const bDis = $('btn-dismantle'), bPick = $('btn-pickup');
+  bDis.innerHTML = '拆解<span class="key">1</span>';
+  bPick.innerHTML = '拾取<span class="key">2</span>';
+  bDis.disabled = !entity.def.dismantle;
+  bPick.disabled = !entity.def.pickable;
+  if (bDis.disabled)  bDis.innerHTML  += `<span class="why">${entity.def.dismantleWhy || '拆无可拆'}</span>`;
+  if (bPick.disabled) bPick.innerHTML += `<span class="why">${entity.def.pickableWhy || '拿不动'}</span>`;
+
+  /* 弹出位置：实体右侧，贴边则换左侧 */
+  dialogEl.style.display = 'block';
+  const r = entity.el.getBoundingClientRect();
+  const dw = dialogEl.offsetWidth, dh = dialogEl.offsetHeight;
+  let x = r.right + 12;
+  if (x + dw > innerWidth - 12) x = r.left - dw - 12;
+  let y = r.top + r.height / 2 - dh / 2;
+  y = Math.max(12, Math.min(y, innerHeight - dh - 12));
+  dialogEl.style.left = x + 'px';
+  dialogEl.style.top = y + 'px';
+
+  if (!state.flags.entityExplained) {
+    state.flags.entityExplained = true;
+    narrate(NARR.entityFirst);
+  }
+}
+
+function closeDialog() {
+  if (state.dialogFor) state.dialogFor.el.classList.remove('focus');
+  state.dialogFor = null;
+  dialogEl.style.display = 'none';
+}
+
+/* ============================================================
+   十、拾取：字平滑飞入背包
+   ============================================================ */
+function pickUp(entity) {
+  closeDialog();
+  state.animating = true;
+  sfx.pickup();
+
+  const from = entity.el.getBoundingClientRect();
+  const to = bagBtn.getBoundingClientRect();
+  removeEntity(entity);
+
+  flyChar(entity.char,
+    { x: from.left + from.width / 2, y: from.top + from.height / 2 },
+    { x: to.left + to.width / 2, y: to.top + to.height / 2 },
+    620, () => {
+      state.bag.push(entity.char);
+      renderBag();
+      popBagBtn();
+      state.animating = false;
+      completeStep('pickup');
+    });
+}
+
+/* ============================================================
+   十一、拆解：屏幕中央拆分，任意数量部件依次飞入背包
+   ============================================================ */
+function dismantle(entity) {
+  closeDialog();
+  state.animating = true;
+  sfx.dismantle();
+
+  const parts = entity.def.dismantle;
+  removeEntity(entity);
+
+  const overlay = $('overlay'), big = $('dis-big'), stage = $('dis-stage');
+  stage.querySelectorAll('.dis-part').forEach(p => p.remove());
+  big.textContent = entity.char;
+  big.classList.remove('crack');
+  big.style.opacity = 1; big.style.transform = 'scale(1)';
+  overlay.classList.add('show');
+
+  later(() => {
+    /* 原字碎裂，部件现身并横向散开 */
+    big.classList.add('crack');
+    const n = parts.length;
+    const partEls = parts.map((c, i) => {
+      const p = document.createElement('span');
+      p.className = 'dis-part';
+      p.textContent = c;
+      stage.appendChild(p);
+      const off = i - (n - 1) / 2;
+      const from = `translate(calc(-50% + ${off * .84}em), -50%)`;
+      const to = `translate(calc(-50% + ${off * 2.4}em), -50%)`;
+      p.style.opacity = 1;
+      p.style.transform = from;
+      p.animate([{ transform: from }, { transform: to }],
+        { duration: 480, easing: 'cubic-bezier(.2,.8,.3,1)', fill: 'forwards' });
+      return p;
+    });
+
+    /* 部件依次飞入背包 */
+    later(() => {
+      const b = bagBtn.getBoundingClientRect();
+      const tp = { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      partEls.forEach((p, i) => {
+        const r = p.getBoundingClientRect();
+        later(() => {
+          p.style.visibility = 'hidden';   // 原部件隐去，由飞行克隆体接管
+          flyChar(parts[i],
+            { x: r.left + r.width / 2, y: r.top + r.height / 2 },
+            tp, 640, () => {
+              state.bag.push(parts[i]);
+              renderBag();
+              popBagBtn();
+            }, 72);
+        }, i * 160);
+      });
+    }, 900);
+
+    /* 收尾 */
+    later(() => {
+      overlay.classList.remove('show');
+      state.animating = false;
+      completeStep('dismantle');
+    }, 900 + n * 160 + 900);
+  }, 950);
+}
+
+/* ============================================================
+   十二、合成 / 破字 / 击打
+   ============================================================ */
+/* 手持字 + 实体字 → 新字（灭：失去碰撞箱） */
+function combineChars(heldChar, target, resultChar) {
+  state.animating = true;
+  sfx.combine();
+
+  const from = playerEl.getBoundingClientRect();
+  const to = target.el.getBoundingClientRect();
+  const idx = state.bag.indexOf(heldChar);
+  if (idx >= 0) state.bag.splice(idx, 1);   // 手持物被消耗
+  setHeld(null);
+
+  flyChar(heldChar,
+    { x: from.left + from.width / 2, y: from.top + from.height / 2 },
+    { x: to.left + to.width / 2, y: to.top + to.height / 2 },
+    420, () => {
+      target.el.classList.add('flash');
+      later(() => {
+        target.char = resultChar;
+        target.el.textContent = resultChar;
+        target.solid = false;
+        target.el.classList.remove('flash', 'entity');
+        if (target.def.cls) target.el.classList.remove(target.def.cls);
+        target.el.classList.add('dead');
+        state.animating = false;
+        completeStep('combine');
+      }, 420);
+    }, 22);
+}
+
+/* ---------- 合体：拆开的字一定能拼回去，但只产出真正的字 ----------
+   把一块部件放在地上，手持另一块撞上去。
+   配方必须精确命中；拼不成字的组合什么也不会发生，不留中间产物。 */
+function tryAssemble(heldChar, target) {
+  const sorted = [target.char, heldChar].sort().join('');
+  const recipe = ASSEMBLIES.find(r => r.sorted === sorted);
+  if (!recipe) return false;
+  assemble(heldChar, target, recipe.result);
+  return true;
+}
+
+function assemble(heldChar, target, resultChar) {
+  state.animating = true;
+  sfx.combine();
+
+  const from = playerEl.getBoundingClientRect();
+  const to = target.el.getBoundingClientRect();
+  const idx = state.bag.indexOf(heldChar);
+  if (idx >= 0) state.bag.splice(idx, 1);   // 手持部件被用掉
+  setHeld(null);
+
+  const tx = target.x, ty = target.y;
+  const targetChar = target.char;
+
+  flyChar(heldChar,
+    { x: from.left + from.width / 2, y: from.top + from.height / 2 },
+    { x: to.left + to.width / 2, y: to.top + to.height / 2 },
+    420, () => {
+      target.el.classList.add('flash');
+      later(() => {
+        removeEntity(target);
+        const ent = spawnCharEntity(resultChar, tx, ty);
+        popIn(ent, tx, ty);
+        narrate(`“${heldChar}”与“${targetChar}”合拢——“${resultChar}”成形了。`);
+        /* 引导：合体完成后再推进（让“门”在日月合成之后才出现） */
+        later(() => completeStep('rejoin'), 800);
+        state.animating = false;
+      }, 380);
+    }, 22);
+}
+
+/* 斧劈万物：目标碎成 res.parts 入包，斧飞回手上；res.release 时解除链的限制 */
+function breakWithAxe(target, res) {
+  state.animating = true;
+  sfx.combine();
+
+  const P = r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  const from = playerEl.getBoundingClientRect();
+  const to = target.el.getBoundingClientRect();
+
+  flyChar('斧', P(from), P(to), 380, () => {
+    target.el.classList.add('flash');
+    sfx.bump();
+    later(() => {
+      removeEntity(target);
+      if (res.release) {
+        state.leash = null;
+        renderLeash();
+        expandVisionToRoom();   // 链断，视野放开到整间屋子
+      }
+      sfx.dismantle();
+
+      const tp = P(bagBtn.getBoundingClientRect());
+      res.parts.forEach((c, i) => {
+        later(() => {
+          flyChar(c, P(to), tp, 620, () => {
+            state.bag.push(c); renderBag(); popBagBtn();
+          }, 30);
+        }, i * 150);
+      });
+
+      later(() => {
+        flyChar('斧', P(to), P(playerEl.getBoundingClientRect()), 380, () => {
+          setHeld('斧');
+          state.animating = false;
+          narrate(res.narr);
+        }, 22);
+      }, 320);
+    }, 380);
+  }, 22);
+}
+
+/* 木凑进火里：木被点燃，还是那块“木”，只是烧红了 */
+function igniteWood(heldChar, target) {
+  if (state.flags.litWood) { narrate('“木”已经烧着了，火苗正旺。'); return; }
+  state.animating = true;
+  sfx.fire();
+
+  const P = r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  const from = P(playerEl.getBoundingClientRect());
+  const to = P(target.el.getBoundingClientRect());
+
+  setHeld(null);   // 木暂时离手，点燃后原样飞回
+  flyChar(heldChar, from, to, 360, () => {
+    target.el.classList.add('flash');
+    later(() => {
+      target.el.classList.remove('flash');
+      state.flags.litWood = true;
+      flyChar(heldChar, to, P(playerEl.getBoundingClientRect()), 380, () => {
+        setHeld(heldChar);
+        state.animating = false;
+        narrate('“木”伸进火里，噼啪一声——它烧起来了。');
+      }, 26);
+    }, 380);
+  }, 22);
+}
+
+/* 烧着的木贴上冰：冰塌成一摊水（无实体背景），水里浮出一个“口”，
+   左下的墙里渗出一声“有人吗”；木被浇灭，还是那块木，不消失。 */
+function meltIce(heldChar, target) {
+  if (!state.flags.litWood) { narrate('一块冷木贴上去，冰纹丝不动。'); return; }
+  state.animating = true;
+  sfx.fire();
+
+  const P = r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  const from = P(playerEl.getBoundingClientRect());
+  const to = P(target.el.getBoundingClientRect());
+  const tx = target.x, ty = target.y;
+
+  setHeld(null);
+  flyChar(heldChar, from, to, 380, () => {
+    target.el.classList.add('flash');
+    later(() => {
+      removeEntity(target);
+      spawnWater(tx, ty);
+      /* “口”在水左边浮出；左边越界、被字占住或主角正站在那儿时，才退回水里 */
+      const taken = (x, y) => !!entityAt(x, y) || (state.player.x === x && state.player.y === y);
+      let kx = tx;
+      if (tx - 1 >= 0 && !taken(tx - 1, ty)) kx = tx - 1;
+      const kou = spawnCharEntity('口', kx, ty);
+      popIn(kou, kx, ty);
+      spawnSound();
+      /* 冰把火浇灭了：木还是那块木，原样飞回手上 */
+      state.flags.litWood = false;
+      flyChar(heldChar, to, P(playerEl.getBoundingClientRect()), 360, () => {
+        setHeld(heldChar);
+        state.animating = false;
+      }, 26);
+      narrate('冰塌成一摊水，水里浮出一个“口”。手里的“木”被浇灭了，还是那块木。与此同时，左下的墙里，传来一声极轻的“有人吗”。');
+    }, 480);
+  }, 22);
+}
+
+/* 水：无实体的背景字，踩得过去 */
+function spawnWater(x, y) {
+  const el = document.createElement('div');
+  el.className = 'cell-char water';
+  el.textContent = '水';
+  setPos(el, x, y);
+  mapEl.appendChild(el);
+  state.waterCells.add(key(x, y));
+}
+
+/* 一点“有人吗”从墙外飘进来：飞向 (ex, ey)，途中渐渐消散 */
+function flySoundTo(ex, ey, duration, onDone) {
+  const el = document.createElement('div');
+  el.className = 'sound-fly';
+  el.textContent = '有人吗';
+  mapEl.appendChild(el);
+
+  const sx = -CELL * .5;
+  const sy = ROWS * CELL + CELL * .2;   // 墙外：左下角的外侧
+  const anim = el.animate([
+    { left: sx + 'px', top: sy + 'px', opacity: 0, transform: 'translate(-50%, -50%) scale(.7)' },
+    { left: (sx + (ex - sx) * .4) + 'px', top: (sy + (ey - sy) * .4) + 'px',
+      opacity: .72, transform: 'translate(-50%, -50%) scale(1)', offset: .35 },
+    { left: ex + 'px', top: ey + 'px', opacity: 0, transform: 'translate(-50%, -50%) scale(1.4)' },
+  ], { duration, easing: 'cubic-bezier(.25,.6,.3,1)', fill: 'both' });
+  anim.onfinish = () => {
+    const alive = el.isConnected;   // 中途切关被清掉时，不再触发后续
+    el.remove();
+    if (alive && onDone) onDone();
+  };
+}
+
+/* 冰化开时，墙里传来“声”：从墙外飞进来，渐渐消失；
+   在主角用“听”听见它之前，一遍又一遍地响 */
+function spawnSound() {
+  if (state.flags.soundSpawned) return;
+  state.flags.soundSpawned = true;
+  soundLoop();
+}
+
+function soundLoop() {
+  if (state.flags.heard || state.dead) return;
+  flySoundTo(2.6 * CELL, (ROWS - 3) * CELL, 2200);
+  later(soundLoop, 2200);   // 与动画同长，首尾相接，直到被“听”见
+}
+
+/* 手持“听”站到左下角：听力被放大，墙里的声音终于清晰起来 */
+function amplifyHearing() {
+  if (state.flags.heard || !state.flags.soundSpawned) return;
+  state.flags.heard = true;
+  sfx.combine();
+  mapEl.querySelectorAll('.sound-fly').forEach(el => el.remove());   // 收起循环中的声音
+
+  flySoundTo(COLS * CELL / 2, ROWS * CELL / 2, 900, () => {
+    showWhisper('“有人吗……”');
+    narrate('“听”放大了那点声响——墙里有人在问，一遍，又一遍：“有人吗？”');
+    later(startRespond, 2400);
+  });
+}
+
+/* 主角回应墙里的声音：话说到一半，缺了一个字 */
+function startRespond() {
+  if (state.flags.responded || state.flags.fillMode || state.dead) return;
+  state.flags.fillMode = true;
+  mapEl.querySelectorAll('.whisper').forEach(el => el.remove());
+
+  const el = document.createElement('div');
+  el.id = 'respond-line';
+  el.className = 'respond';
+  el.innerHTML = '我被<span class="blank"></span>在这里了';
+  mapEl.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+
+  if (!state.bagOpen) toggleBag(true);
+  renderBag();
+  narrate('你张了张嘴，回应墙里的声音——话到嘴边，却缺了一个字。到行囊里挑一个字，填进去。');
+}
+
+/* 行囊里选字填空：只有“困”能塞进那句话。
+   点别的字不会白点——照常拿在手上，方便玩家先去把字合出来。 */
+function tryFill(char) {
+  if (!state.flags.fillMode) return;
+  if (char !== '困') {
+    sfx.bump();
+    const willHold = state.player.held !== char;
+    setHeld(willHold ? char : null);
+    narrate(willHold
+      ? `“${char}”填不进那句话——那句话还缺着一个字。你把它拿在了手上。`
+      : `“${char}”填不进那句话——那句话，还缺着一个字。`);
+    return;
+  }
+
+  state.flags.fillMode = false;
+  state.flags.responded = true;
+  sfx.combine();
+
+  const line = $('respond-line');
+  if (line) {
+    line.querySelector('.blank').textContent = '困';
+    line.classList.add('filled');
+    later(() => line.classList.remove('show'), 3600);
+  }
+  renderBag();
+  narrate('“我被困在这里了。”——墙里静了很久，那个声音才低低地应了一声。');
+  later(() => showWhisper('“……我也是。”'), 1600);
+}
+
+function showWhisper(text) {
+  mapEl.querySelectorAll('.whisper').forEach(el => el.remove());
+  const el = document.createElement('div');
+  el.className = 'whisper';
+  el.textContent = text;
+  mapEl.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+}
+
+/* 斧击石：每击一次石亮 20%，第三击石上生火，石恢复原亮度 */
+function strikeEntity(target) {
+  const cfg = target.def.strike;
+  if (state.flags.stoneFired) { narrate('石上再打不出火来。'); return; }
+
+  const next = (target.hits || 0) + 1;
+  if (next < cfg.hits) {
+    target.hits = next;
+    sfx.strike(next);
+    target.el.style.filter = `brightness(${1 + 0.2 * next})`;
+    return;
+  }
+
+  const cell = findSpawnCell(target);
+  if (!cell) { narrate('石的上方没有空隙，火起不来。'); return; }
+
+  target.hits = 0;
+  state.flags.stoneFired = true;
+  sfx.strike(cfg.hits);
+  target.el.style.filter = `brightness(${1 + 0.2 * cfg.hits})`;   // 第三击同样变亮 20%
+  target.el.classList.add('flash');
+  later(() => target.el.classList.remove('flash'), 460);
+  later(() => {
+    target.el.style.filter = '';        // 火生成，石恢复原亮度
+    spawnFire(cell.x, cell.y, cfg.spawn);
+  }, 260);
+}
+
+/* 生火的位置：优先正上方，被占则向左右下让 */
+function findSpawnCell(ent) {
+  const dirs = [{ dx: 0, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: 1 }];
+  for (const d of dirs) {
+    const nx = ent.x + d.dx, ny = ent.y + d.dy;
+    if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+    if (entityAt(nx, ny)) continue;
+    return { x: nx, y: ny };
+  }
+  return null;
+}
+
+function spawnFire(x, y, char) {
+  const ent = spawnCharEntity(char, x, y);
+  ent.el.style.opacity = 0;
+  const tx = (x * CELL) + 'px', ty = (y * CELL) + 'px';
+  const anim = ent.el.animate([
+    { transform: `translate(${tx}, ${ty}) scale(2.6)`, opacity: 0 },
+    { transform: `translate(${tx}, ${ty}) scale(.9)`, opacity: 1, offset: .55 },
+    { transform: `translate(${tx}, ${ty}) scale(1)`, opacity: 1 },
+  ], { duration: 520, easing: 'cubic-bezier(.2,.8,.3,1)' });
+  anim.onfinish = () => { ent.el.style.opacity = ''; };
+  sfx.fire();
+
+  /* 火正好烧在你脚下：闪开 */
+  if (state.player.x === x && state.player.y === y) flashToSafety(x, y);
+
+  /* 20 秒内没被“灭”掉，火就开始失控蔓延 */
+  later(() => {
+    if (state.dead) return;
+    const stillBurning = [...state.entities.values()].some(e => e.char === '火');
+    if (stillBurning) beginFireSpread();
+  }, 20000);
+}
+
+/* 闪到火左侧一格（左侧被占则依次让向右、上、下） */
+function flashToSafety(fx, fy) {
+  const dirs = [{ dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: -1 }, { dx: 0, dy: 1 }];
+  const spot = dirs
+    .map(d => ({ x: fx + d.dx, y: fy + d.dy }))
+    .find(c => c.x >= 0 && c.y >= 0 && c.x < COLS && c.y < ROWS && !entityAt(c.x, c.y));
+  if (!spot) return;
+
+  state.player.x = spot.x;
+  state.player.y = spot.y;
+  playerEl.style.transition = 'none';
+  setPos(playerEl, spot.x, spot.y);
+  void playerEl.offsetWidth;
+  playerEl.style.transition = 'transform .13s ease-out';
+  later(() => narrate('好险.....'), 180);
+}
+
+/* ============================================================
+   十二·五、失控的火：20 秒不灭，每 2 秒向四周蔓延，直至烧穿全屋
+   ============================================================ */
+function beginFireSpread() {
+  if (state.fireSpreading || state.dead) return;
+  state.fireSpreading = true;
+  narrate('火舌忽然舔上地面——它不听话了，正往四周爬。');
+  sfx.fire();
+  later(fireTick, 2000);
+}
+
+function fireTick() {
+  if (state.dead) return;
+  spreadFire();
+  if (state.dead) return;
+  later(fireTick, 2000);
+}
+
+function spreadFire() {
+  const fires = [...state.entities.values()].filter(e => e.char === '火');
+  if (!fires.length) return;
+
+  const targets = new Map();
+  for (const f of fires) {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const x = f.x + dx, y = f.y + dy;
+      if (x < 1 || y < 1 || x > COLS - 2 || y > ROWS - 2) continue;   // 墙外不烧
+      if (state.waterCells.has(key(x, y))) continue;                  // 水格不烧
+      const t = entityAt(x, y);
+      if (t && (t.char === '墙' || t.char === '火')) continue;
+      targets.set(key(x, y), { x, y });
+    }
+  }
+  if (!targets.size) return;
+
+  sfx.fire();
+  let hitPlayer = false;
+
+  targets.forEach(({ x, y }) => {
+    const t = entityAt(x, y);
+    if (t) removeEntity(t);            // 火过之处，字都被吞掉
+    const ent = spawnCharEntity('火', x, y);
+    ent.el.classList.add('flash');
+    later(() => ent.el.classList.remove('flash'), 320);
+    if (state.player.x === x && state.player.y === y) hitPlayer = true;
+  });
+
+  if (hitPlayer) { dieByFire(); return; }
+  if (!roomAllBurning()) return;
+
+  /* 全屋只剩水那一格没烧着：站在水里的人，暂时还活着 */
+  if (state.waterCells.has(key(state.player.x, state.player.y))) {
+    if (!state.flags.waterSurvive) {
+      state.flags.waterSurvive = true;
+      narrate('整间屋子都在烧，只有脚下这洼水还是凉的。');
+    }
+    return;
+  }
+  dieByFire();
+}
+
+function roomAllBurning() {
+  for (let y = 1; y <= ROWS - 2; y++) {
+    for (let x = 1; x <= COLS - 2; x++) {
+      if (state.waterCells.has(key(x, y))) continue;   // 水格永远烧不着
+      const t = entityAt(x, y);
+      if (!t || t.char !== '火') return false;
+    }
+  }
+  return true;
+}
+
+function dieByFire() {
+  if (state.dead) return;
+  state.dead = true;
+  state.animating = true;
+  closeDialog();
+  toggleBag(false);
+  $('overlay').classList.remove('show');
+  $('death-overlay').classList.add('show');
+  narrate('火吞掉了最后一格。我，也烧没了。');
+  sfx.fire();
+}
+
+/* ============================================================
+   十三、飞行字符 / 实体增删
+   ============================================================ */
+function flyChar(char, from, to, duration, onDone, fontSize = 26) {
+  const el = document.createElement('div');
+  el.className = 'fly-char';
+  el.textContent = char;
+  el.style.fontSize = fontSize + 'px';
+  el.style.left = from.x + 'px';
+  el.style.top = from.y + 'px';
+  document.body.appendChild(el);
+  el.animate([
+    { left: from.x + 'px', top: from.y + 'px', opacity: 1, transform: 'translate(-50%,-50%) scale(1)' },
+    { left: to.x + 'px', top: to.y + 'px', opacity: .85, transform: 'translate(-50%,-50%) scale(.38)' },
+  ], { duration, easing: 'cubic-bezier(.45,0,.75,.35)', fill: 'forwards' });
+  later(() => { el.remove(); onDone && onDone(); }, duration);
+}
+
+function popBagBtn() {
+  bagBtn.classList.remove('pop');
+  void bagBtn.offsetWidth;
+  bagBtn.classList.add('pop');
+}
+
+function removeEntity(entity) {
+  state.entities.delete(key(entity.x, entity.y));
+  entity.el.remove();
+}
+
+/* 原地弹出：新生成的字从大到小落定 */
+function popIn(ent, x, y) {
+  const tx = (x * CELL) + 'px', ty = (y * CELL) + 'px';
+  ent.el.style.opacity = 0;
+  const a = ent.el.animate([
+    { transform: `translate(${tx}, ${ty}) scale(1.5)`, opacity: 0 },
+    { transform: `translate(${tx}, ${ty}) scale(.94)`, opacity: 1, offset: .6 },
+    { transform: `translate(${tx}, ${ty}) scale(1)`, opacity: 1 },
+  ], { duration: 380, easing: 'cubic-bezier(.2,.8,.3,1)' });
+  a.onfinish = () => { ent.el.style.opacity = ''; };
+}
+
+const genericDropDef = char => ({
+  kind: 'entity', solid: true, sub: '你把它放在了地上',
+  pickable: true, dismantle: null, dismantleWhy: '拆无可拆',
+});
+
+function spawnCharEntity(char, x, y) {
+  const def = CHARS[char] || genericDropDef(char);
+  const el = document.createElement('div');
+  el.className = 'cell-char ' +
+    (def.kind === 'scene' ? (def.grass ? 'grass' : 'scene') : (def.chain ? 'chain' : 'entity')) +
+    (def.cls ? ' ' + def.cls : '');
+  el.textContent = char;
+  setPos(el, x, y);
+  mapEl.appendChild(el);
+  const ent = { char, x, y, kind: def.kind, solid: def.solid, def, el };
+  state.entities.set(key(x, y), ent);
+  return ent;
+}
+
+/* ============================================================
+   十四、背包 · 手持 · 放下
+   ============================================================ */
+/* 落点：优先身前，其次下右上左；有链时优先牢笼内的空地 */
+function findDropCell() {
+  const p = state.player;
+  const f = p.facing || { dx: 0, dy: 1 };
+  const dirs = [f, { dx: 0, dy: 1 }, { dx: 1, dy: 0 }, { dx: 0, dy: -1 }, { dx: -1, dy: 0 }];
+  const seen = new Set(), free = [];
+  for (const d of dirs) {
+    const tag = d.dx + ',' + d.dy;
+    if (seen.has(tag)) continue;
+    seen.add(tag);
+    const nx = p.x + d.dx, ny = p.y + d.dy;
+    if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+    if (entityAt(nx, ny)) continue;
+    free.push({ x: nx, y: ny });
+  }
+  if (!free.length) return null;
+  if (state.leash) {
+    const L = state.leash;
+    const inside = free.find(c => c.x >= L.x1 && c.x <= L.x2 && c.y >= L.y1 && c.y <= L.y2);
+    if (inside) return inside;
+  }
+  return free[0];
+}
+
+function dropChar(char, fromRect) {
+  if (state.animating) return;
+  const idx = state.bag.indexOf(char);
+  const isHeld = state.player.held === char;
+  if (idx < 0 && !isHeld) return;      // 手持物可能不在背包里（如劈链后飞回手上的斧）
+  const cell = findDropCell();
+  if (!cell) { sfx.bump(); narrate('四周没有空地，无处安放。'); return; }
+
+  if (idx >= 0) state.bag.splice(idx, 1);
+  if (isHeld) {
+    state.player.held = null;
+    $('held-char').textContent = '';
+    $('held-char').classList.remove('lit');
+  }
+  renderBag();
+  sfx.open();
+
+  const ent = spawnCharEntity(char, cell.x, cell.y);
+  if (char === '木' && state.flags.litWood) ent.el.classList.add('lit-wood');
+  ent.el.style.opacity = 0;
+  const er = ent.el.getBoundingClientRect();
+  const pr = playerEl.getBoundingClientRect();
+  const from = fromRect
+    ? { x: fromRect.left + fromRect.width / 2, y: fromRect.top + fromRect.height / 2 }
+    : { x: pr.left + pr.width / 2, y: pr.top + pr.height / 2 };
+  const to = { x: er.left + er.width / 2, y: er.top + er.height / 2 };
+
+  flyChar(char, from, to, 380, () => {
+    ent.el.style.opacity = '';
+    const tx = (cell.x * CELL) + 'px', ty = (cell.y * CELL) + 'px';
+    ent.el.animate([
+      { transform: `translate(${tx}, ${ty}) scale(1.55)`, opacity: 0 },
+      { transform: `translate(${tx}, ${ty}) scale(.94)`, opacity: 1, offset: .6 },
+      { transform: `translate(${tx}, ${ty}) scale(1)`, opacity: 1 },
+    ], { duration: 360, easing: 'cubic-bezier(.2,.8,.3,1)' });
+  });
+
+  completeStep('drop');
+}
+
+function renderBag() {
+  const grid = $('bag-grid');
+  grid.innerHTML = '';
+  $('bag-count').textContent = state.bag.length || '';
+  if (!state.bag.length) {
+    grid.innerHTML = '<div id="bag-empty">行 囊 空 空</div>';
+    return;
+  }
+  state.bag.forEach(char => {
+    const slot = document.createElement('div');
+    slot.className = 'bag-slot' + (state.player.held === char ? ' held' : '') +
+                     (char === '木' && state.flags.litWood ? ' lit' : '') +
+                     (state.flags.fillMode ? ' fillable' : '');
+    slot.textContent = char;
+    slot.title = state.flags.fillMode ? '选一个字填进去 · 其他字会拿在手上'
+                                      : '左键手持 · 右键放下';
+    slot.onclick = () => {
+      openVision();
+      if (state.flags.fillMode) { tryFill(char); return; }
+      setHeld(state.player.held === char ? null : char);
+      if (state.player.held) completeStep('hold');
+      sfx.open();
+    };
+    slot.oncontextmenu = e => {
+      e.preventDefault();
+      openVision();
+      dropChar(char, slot.getBoundingClientRect());
+    };
+    grid.appendChild(slot);
+  });
+}
+
+function setHeld(char) {
+  state.player.held = char;
+  const hc = $('held-char');
+  hc.textContent = char || '';
+  hc.classList.toggle('lit', char === '木' && state.flags.litWood);
+  renderBag();
+
+  /* 已站在左下角时再拿起“听”，同样放大听力 */
+  if (char === '听' && state.player.x === 1 && state.player.y === ROWS - 2) amplifyHearing();
+}
+
+function toggleBag(force) {
+  state.bagOpen = force !== undefined ? force : !state.bagOpen;
+  bagPanel.classList.toggle('show', state.bagOpen);
+  sfx.open();
+  if (state.bagOpen) { renderBag(); completeStep('openbag'); }
+}
+
+/* ============================================================
+   十五、输入
+   ============================================================ */
+document.addEventListener('keydown', e => {
+  initAudio();
+  const k = e.key.toLowerCase();
+  if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
+
+  /* R 重开本关：任何时候都生效 */
+  if (k === 'r') { gotoLevel(state.levelIndex); return; }
+  if (switching || state.dead) return;
+  openVision();   // 任意行动：视野自主角散开
+
+  /* 对话框打开：1 拆解 / 2 拾取 / Esc 离开 */
+  if (state.dialogFor) {
+    const ent = state.dialogFor;
+    if (k === '1' && ent.def.dismantle) dismantle(ent);
+    else if (k === '2' && ent.def.pickable) pickUp(ent);
+    else if (k === 'escape') closeDialog();
+    return;
+  }
+
+  if (k === 'f') { toggleBag(); return; }
+  if (k === 'g') { if (state.player.held) dropChar(state.player.held, bagBtn.getBoundingClientRect()); return; }
+  if (k === 'escape') { if (state.bagOpen) toggleBag(false); return; }
+  if (state.animating) return;
+
+  if (k === 'w' || k === 'arrowup') tryMove(0, -1);
+  else if (k === 's' || k === 'arrowdown') tryMove(0, 1);
+  else if (k === 'a' || k === 'arrowleft') tryMove(-1, 0);
+  else if (k === 'd' || k === 'arrowright') tryMove(1, 0);
+});
+
+bagBtn.addEventListener('click', () => { initAudio(); openVision(); toggleBag(); });
+
+/* 对话框按钮：鼠标点击，与键盘 1 / 2 / Esc 等效 */
+$('btn-dismantle').addEventListener('click', () => {
+  const ent = state.dialogFor;
+  if (ent && ent.def.dismantle) { openVision(); dismantle(ent); }
+});
+$('btn-pickup').addEventListener('click', () => {
+  const ent = state.dialogFor;
+  if (ent && ent.def.pickable) { openVision(); pickUp(ent); }
+});
+$('btn-leave').addEventListener('click', () => { openVision(); closeDialog(); });
+
+/* 点击对话框之外即关闭（行囊是常驻侧栏，只由行囊按钮收合） */
+document.addEventListener('mousedown', e => {
+  if (state.dialogFor && !dialogEl.contains(e.target)) closeDialog();
+});
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+/* ============================================================
+   十六、窗口自适应缩放 + 启动
+   ============================================================ */
+function fit() {
+  /* 宽度预算含右侧行囊（728 + 314），保证侧栏不会被挤出屏幕 */
+  const s = Math.min(1, (innerWidth - 60) / 1060, (innerHeight - 60) / 720);
+  $('stage').style.transform = `translate(-50%, -50%) scale(${s})`;
+}
+window.addEventListener('resize', fit);
+
+fit();
+loadLevel(0);
+</script>
+</body>
+</html>
