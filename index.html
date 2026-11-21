@@ -1599,11 +1599,11 @@ function startSay() {
       popIn(spawnSayChar(ch, x, y), x, y);
     } else if (i === 0) {
       state.flags.saySelfPos = { x, y };   // “我”的那一格：主角站进去
-      spawnSayBlank(x, y, true);
+      spawnSayBlank(x, y, 'say-blank-self');
     } else {
       state.flags.sayBlank = true;
       state.flags.sayBlankPos = { x, y };
-      spawnSayBlank(x, y, false);
+      spawnSayBlank(x, y, '');
     }
   });
   narrate('你朝着墙里喊了回去——“我被　住了。”可话一出口，第一个“我”和中间那个字都空着：一个要你亲自站进去，一个要你把字放进去。');
@@ -1626,7 +1626,7 @@ function findSaySpot(len) {
 }
 
 function spawnSayChar(ch, x, y) {
-  const def = { kind: 'scene', solid: false };
+  const def = { kind: 'scene', solid: false, say: true };
   const el = document.createElement('div');
   el.className = 'cell-char scene say';
   el.textContent = ch;
@@ -1638,9 +1638,9 @@ function spawnSayChar(ch, x, y) {
 }
 
 /* 空位：不占实体格，只是一道等人来填的浅痕 */
-function spawnSayBlank(x, y, isSelf) {
+function spawnSayBlank(x, y, extra) {
   const el = document.createElement('div');
-  el.className = 'cell-char say-blank' + (isSelf ? ' say-blank-self' : '');
+  el.className = 'cell-char say-blank' + (extra ? ' ' + extra : '');
   el.textContent = '_';
   setPos(el, x, y);
   mapEl.appendChild(el);
@@ -1655,25 +1655,18 @@ function refreshSelfBlank() {
   el.classList.toggle('filled', state.player.x === p.x && state.player.y === p.y);
 }
 
-/* 放到地上的字，正好是那句话缺的答案：让它落进空位 */
-function checkSayAnswer(char, ent) {
-  if (!state.flags.sayBlank || char !== '困') return;
-  state.flags.sayBlank = false;
-  sfx.combine();
-
-  const pos = state.flags.sayBlankPos;
+/* 把落在地上的字收进句子的空位，从此成为句子的一部分 */
+function absorbIntoBlank(ent, pos) {
   const fromTx = ent.x * CELL, fromTy = ent.y * CELL;
   state.entities.delete(key(ent.x, ent.y));
-  mapEl.querySelectorAll('.say-blank:not(.say-blank-self)').forEach(el => el.remove());
 
   /* 空位若被先前放下的字占住，先把占位的字退回行囊 */
   const occ = entityAt(pos.x, pos.y);
   if (occ && occ !== ent) { removeEntity(occ); state.bag.push(occ.char); renderBag(); }
 
-  /* 这个字从此是场景的一部分：非交互，踩得过去 */
   ent.x = pos.x; ent.y = pos.y;
   ent.kind = 'scene'; ent.solid = false;
-  ent.def = { kind: 'scene', solid: false };
+  ent.def = { kind: 'scene', solid: false, say: true };
   ent.el.className = 'cell-char scene say';
   state.entities.set(key(pos.x, pos.y), ent);
   setPos(ent.el, pos.x, pos.y);
@@ -1681,11 +1674,33 @@ function checkSayAnswer(char, ent) {
     { transform: `translate(${fromTx}px, ${fromTy}px)` },
     { transform: `translate(${pos.x * CELL}px, ${pos.y * CELL}px)` },
   ], { duration: 520, easing: 'cubic-bezier(.25,.7,.3,1)', fill: 'backwards' });
+}
 
-  later(() => {
-    state.flags.sayFormed = true;
-    checkSayComplete(true);
-  }, 560);
+/* 放到地上的字，正好是那句话缺的答案：让它落进空位 */
+function checkSayAnswer(char, ent) {
+  /* 第一句：“我被困住了”缺“困” */
+  if (state.flags.sayBlank && char === '困') {
+    state.flags.sayBlank = false;
+    sfx.combine();
+    mapEl.querySelectorAll('.say-blank:not(.say-blank-self)').forEach(el => el.remove());
+    absorbIntoBlank(ent, state.flags.sayBlankPos);
+    later(() => {
+      state.flags.sayFormed = true;
+      checkSayComplete(true);
+    }, 560);
+    return;
+  }
+
+  /* 第二句：“你有石头吗”缺“石” */
+  if (state.flags.sayBlank2 && char === '石') {
+    state.flags.sayBlank2 = false;
+    sfx.combine();
+    mapEl.querySelectorAll('.say-blank-ask').forEach(el => el.remove());
+    absorbIntoBlank(ent, state.flags.sayBlank2Pos);
+    later(() => {
+      narrate('“你有石头吗？”——石头落进那句话里。墙里静了一瞬，那个声音忽然近了：“石头……把它递进来。”');
+    }, 560);
+  }
 }
 
 /* 完整条件：句子拼齐（“困”就位）＋ 主角站进“我”的空位 */
@@ -1709,6 +1724,32 @@ function checkSayComplete(announceMiss) {
   spawnSayChar('我', self.x, self.y);
 
   narrate('你站进了那个空位——“我被困住了。”这一次，是整句话。墙里静了很久，那个声音忽然一字一字地回你：“别急，我来救你！”');
+  later(transformToAsk, 3200);   // 救你的话落下，屋里那句话又变了
+}
+
+/* “我来救你”之后：整句话散开重排，变成墙里的反问——“你有＿头吗？” */
+function transformToAsk() {
+  if (state.flags.askShown || state.dead) return;
+  state.flags.askShown = true;
+
+  /* 收掉上一句的每一个字与空痕 */
+  [...state.entities.values()].filter(e => e.def && e.def.say).forEach(removeEntity);
+  mapEl.querySelectorAll('.cell-char.say, .say-blank').forEach(el => el.remove());
+
+  const chars = ['你', '有', null, '头', '吗', '？'];
+  const spot = findSaySpot(chars.length);
+  if (!spot) return;
+  chars.forEach((ch, i) => {
+    const x = spot.x + i, y = spot.y;
+    if (ch) {
+      popIn(spawnSayChar(ch, x, y), x, y);
+    } else {
+      state.flags.sayBlank2 = true;
+      state.flags.sayBlank2Pos = { x, y };
+      spawnSayBlank(x, y, 'say-blank-ask');
+    }
+  });
+  narrate('“别急，我来救你”的回声还没散，屋里那句话忽然自己变了——“你有　头吗？”');
 }
 
 /* 斧击石：每击一次石亮 20%，第三击石上生火，石恢复原亮度 */
