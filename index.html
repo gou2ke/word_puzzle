@@ -1189,6 +1189,12 @@ function movePlayer(nx, ny, underEntity) {
       }
     }
   }
+
+  /* 那句话里的“我”：主角亲自站进那个空位 */
+  if (state.flags.saySelfPos) {
+    refreshSelfBlank();
+    checkSayComplete(false);
+  }
 }
 
 /* 撞击动画：主角顶一下 + 目标字抖动 */
@@ -1578,26 +1584,29 @@ function amplifyHearing() {
   later(startSay, 2000);           // 停顿两秒，主角再回应
 }
 
-/* 主角喊回去：“我被＿住了”——每个字落进屋里，都是非交互的场景字；
-   唯独中间那个字空着，等玩家把答案放到地上 */
+/* 主角喊回去：“_被_住了”——字落进屋里，都是非交互的场景字。
+   第一个空位是“我”：由主角亲自站进去；第三个空位是“困”：等玩家把字放到地上 */
 function startSay() {
   if (state.flags.sayShown || state.dead) return;
   state.flags.sayShown = true;
 
-  const chars = ['我', '被', null, '住', '了'];   // null = 缺的那个字
+  const chars = [null, '被', null, '住', '了'];   // null = 空位
   const spot = findSaySpot(chars.length);
   if (!spot) return;   // 屋里实在摆不下（几乎不可能），保持沉默
   chars.forEach((ch, i) => {
     const x = spot.x + i, y = spot.y;
     if (ch) {
       popIn(spawnSayChar(ch, x, y), x, y);
+    } else if (i === 0) {
+      state.flags.saySelfPos = { x, y };   // “我”的那一格：主角站进去
+      spawnSayBlank(x, y, true);
     } else {
       state.flags.sayBlank = true;
       state.flags.sayBlankPos = { x, y };
-      spawnSayBlank(x, y);
+      spawnSayBlank(x, y, false);
     }
   });
-  narrate('你朝着墙里喊了回去——“我被　住了。”字一个个落进屋里；唯独中间那个字，你还没有。');
+  narrate('你朝着墙里喊了回去——“我被　住了。”可话一出口，第一个“我”和中间那个字都空着：一个要你亲自站进去，一个要你把字放进去。');
 }
 
 /* 在屋里找一排连续的空位，把那句话放在那儿 */
@@ -1629,12 +1638,21 @@ function spawnSayChar(ch, x, y) {
 }
 
 /* 空位：不占实体格，只是一道等人来填的浅痕 */
-function spawnSayBlank(x, y) {
+function spawnSayBlank(x, y, isSelf) {
   const el = document.createElement('div');
-  el.className = 'cell-char say-blank';
+  el.className = 'cell-char say-blank' + (isSelf ? ' say-blank-self' : '');
   el.textContent = '_';
   setPos(el, x, y);
   mapEl.appendChild(el);
+}
+
+/* 主角站上“我”的空位时，空痕让位给主角本身 */
+function refreshSelfBlank() {
+  const p = state.flags.saySelfPos;
+  if (!p) return;
+  const el = mapEl.querySelector('.say-blank-self');
+  if (!el) return;
+  el.classList.toggle('filled', state.player.x === p.x && state.player.y === p.y);
 }
 
 /* 放到地上的字，正好是那句话缺的答案：让它落进空位 */
@@ -1646,7 +1664,7 @@ function checkSayAnswer(char, ent) {
   const pos = state.flags.sayBlankPos;
   const fromTx = ent.x * CELL, fromTy = ent.y * CELL;
   state.entities.delete(key(ent.x, ent.y));
-  mapEl.querySelectorAll('.say-blank').forEach(el => el.remove());
+  mapEl.querySelectorAll('.say-blank:not(.say-blank-self)').forEach(el => el.remove());
 
   /* 空位若被先前放下的字占住，先把占位的字退回行囊 */
   const occ = entityAt(pos.x, pos.y);
@@ -1665,8 +1683,32 @@ function checkSayAnswer(char, ent) {
   ], { duration: 520, easing: 'cubic-bezier(.25,.7,.3,1)', fill: 'backwards' });
 
   later(() => {
-    narrate('“困”落进那句话里——我被困住了。墙里静了很久，那个声音忽然一字一顿地回你：“别急，我来救你！”');
+    state.flags.sayFormed = true;
+    checkSayComplete(true);
   }, 560);
+}
+
+/* 完整条件：句子拼齐（“困”就位）＋ 主角站进“我”的空位 */
+function checkSayComplete(announceMiss) {
+  if (!state.flags.sayFormed || state.flags.sayDone) return;
+  const p = state.flags.saySelfPos;
+  if (!p) return;
+
+  refreshSelfBlank();
+  if (state.player.x !== p.x || state.player.y !== p.y) {
+    if (announceMiss) narrate('“我被困住了。”——这句话还缺一个“我”。站到那个空位上去，它才成立。');
+    return;
+  }
+
+  state.flags.sayDone = true;
+  sfx.combine();
+
+  /* 主角站定的这一瞬，“我”就留在句子里了 */
+  const self = state.flags.saySelfPos;
+  mapEl.querySelectorAll('.say-blank-self').forEach(el => el.remove());
+  spawnSayChar('我', self.x, self.y);
+
+  narrate('你站进了那个空位——“我被困住了。”这一次，是整句话。墙里静了很久，那个声音忽然一字一字地回你：“别急，我来救你！”');
 }
 
 /* 斧击石：每击一次石亮 20%，第三击石上生火，石恢复原亮度 */
