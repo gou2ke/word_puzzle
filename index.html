@@ -153,6 +153,28 @@ html, body {
   50%      { opacity: .9; }
 }
 
+/* 带裂缝的墙：墙面上多了一道细裂，只有这里能下钻 */
+.cell-char.wall-cracked { color: #625f55; }
+.cell-char.wall-cracked::before,
+.cell-char.wall-cracked::after {
+  content: '';
+  position: absolute;
+  border-radius: 1px;
+  background: linear-gradient(180deg, rgba(4, 4, 6, .98), rgba(12, 12, 14, .85));
+  box-shadow: 1px 0 0 rgba(214, 202, 168, .22), 0 0 5px rgba(0, 0, 0, .95);
+  pointer-events: none;
+}
+.cell-char.wall-cracked::before {
+  left: 26px; top: 12px;
+  width: 2px; height: 26px;
+  transform: rotate(15deg);
+}
+.cell-char.wall-cracked::after {
+  left: 29px; top: 34px;
+  width: 2px; height: 12px;
+  transform: rotate(-36deg);
+}
+
 /* 可交互实体：淡金色呼吸光 */
 .cell-char.entity {
   color: #d8c78a;
@@ -228,6 +250,11 @@ html, body {
   color: #6f6a55;
   z-index: 2;
   animation: sayBlankPulse 1.6s ease-in-out infinite;
+}
+/* 填进句子的字：既是句子的一部分，也是能取回来的实体 */
+.cell-char.say-filled {
+  color: #ffd27a;
+  text-shadow: 0 0 14px rgba(255, 210, 122, .8);
 }
 @keyframes sayBlankPulse {
   0%, 100% { opacity: .35; }
@@ -642,10 +669,9 @@ let COLS = 0, ROWS = 0;
    ============================================================ */
 const CHARS = {
   '墙': { kind: 'scene', solid: true,
-         /* 手持“斧”“钻”撞墙，各有各的结果 */
+         /* 手持“斧”撞墙：只崩下碎屑，没有任何结果 */
          combine: {
            '斧': { action: 'axeWall' },
-           '钻': { action: 'drillWall' },
          } },
   '草': { kind: 'scene', solid: false, grass: true },
   '树': { kind: 'scene', solid: true },
@@ -793,6 +819,7 @@ const LEVELS = [
       '墙墙墙墙墙墙墙墙墙墙墙墙墙',
     ],
     intro: '空屋。四壁是“墙”，四壁之外，还是“墙”。屋里什么都没有——除了一把“斧”、一张“桌”、一块“石”，和角落里一块化不开的“冰”。还有墙角那条“链”：它拴着你，你的全部世界，只有这四格。',
+    cracked: [{ x: 2, y: 8 }],   // 房间下方那道带裂缝的墙
   },
 ];
 
@@ -899,6 +926,7 @@ function buildMap() {
   const MAP = state.level.map;
   ROWS = MAP.length;
   COLS = MAP[0].length;
+  const crackedSet = new Set((state.level.cracked || []).map(c => key(c.x, c.y)));
 
   for (let y = 0; y < ROWS; y++) {
     for (let x = 0; x < COLS; x++) {
@@ -914,7 +942,12 @@ function buildMap() {
       el.textContent = ch;
       setPos(el, x, y);
       mapEl.appendChild(el);
-      state.entities.set(key(x, y), { char: ch, x, y, kind: def.kind, solid: def.solid, def, el });
+      const ent = { char: ch, x, y, kind: def.kind, solid: def.solid, def, el };
+      if (crackedSet.has(key(x, y))) {   // 带裂缝的墙：钻头唯一能钻开的地方
+        ent.cracked = true;
+        el.classList.add('wall-cracked');
+      }
+      state.entities.set(key(x, y), ent);
 
       if (def.chain) state.leash = { x1: x, y1: y, x2: x + 1, y2: y + 1 };   // 链为左上角的 2×2 牢笼
     }
@@ -1153,7 +1186,7 @@ function tryMove(dx, dy) {
     }
     bumpFx(dx, dy, target);
 
-    /* 手持物配方优先：墙也会对“斧”“钻”有反应 */
+    /* 手持物配方优先：墙也会对“斧”有反应 */
     const held = state.player.held;
     if (held && target.def.combine && target.def.combine[held]) {
       const res = target.def.combine[held];
@@ -1162,7 +1195,12 @@ function tryMove(dx, dy) {
       else if (res.action === 'ignite') igniteWood(held, target, res);
       else if (res.action === 'melt') meltIce(held, target);
       else if (res.action === 'axeWall') axeWall(target);
-      else if (res.action === 'drillWall') drillWall(target);
+      return;
+    }
+
+    /* 钻头只认带裂缝的墙；普通墙撞上去什么也不会发生，也不提醒 */
+    if (held === '钻' && target.char === '墙') {
+      if (target.cracked) drillWall(target);
       return;
     }
 
@@ -1236,7 +1274,14 @@ function bumpFx(dx, dy, target) {
   }
 }
 
-function onBumpScene() {
+function onBumpScene(target) {
+  if (target.def && target.def.say) {   // 说出口的话：字字生根，搬不动
+    if (!state.flags.sayBlockedHinted) {
+      state.flags.sayBlockedHinted = true;
+      narrate('这句话已经落在屋里，字字生根，挡在面前。');
+    }
+    return;
+  }
   if (!state.flags.sceneExplained) {
     state.flags.sceneExplained = true;
     narrate(NARR.sceneFirst);
@@ -1292,6 +1337,7 @@ function pickUp(entity) {
   state.animating = true;
   sfx.pickup();
 
+  const slot = entity.saySlot, sx = entity.x, sy = entity.y;
   const from = entity.el.getBoundingClientRect();
   const to = bagBtn.getBoundingClientRect();
   removeEntity(entity);
@@ -1305,6 +1351,7 @@ function pickUp(entity) {
       popBagBtn();
       state.animating = false;
       completeStep('pickup');
+      if (slot) reopenSayBlank(slot, sx, sy);   // 取回填字，空位重新露出
     });
 }
 
@@ -1537,10 +1584,12 @@ function meltIce(heldChar, target) {
     later(() => {
       removeEntity(target);
       spawnWater(tx, ty);
-      /* “口”在水左边浮出；左边越界、被字占住或主角正站在那儿时，才退回水里 */
+      /* “口”浮在冰的左边；左边被占就继续往左找，实在没有才退回水里 */
       const taken = (x, y) => !!entityAt(x, y) || (state.player.x === x && state.player.y === y);
       let kx = tx;
-      if (tx - 1 >= 0 && !taken(tx - 1, ty)) kx = tx - 1;
+      for (let x = tx - 1; x >= 1; x--) {
+        if (!taken(x, ty)) { kx = x; break; }
+      }
       const kou = spawnCharEntity('口', kx, ty);
       popIn(kou, kx, ty);
       spawnSound();
@@ -1654,14 +1703,14 @@ function findSaySpot(len) {
   return null;
 }
 
-function spawnSayChar(ch, x, y) {
-  const def = { kind: 'scene', solid: false, say: true };
+function spawnSayChar(ch, x, y, solid = true) {
+  const def = { kind: 'scene', solid, say: true };
   const el = document.createElement('div');
   el.className = 'cell-char scene say';
   el.textContent = ch;
   setPos(el, x, y);
   mapEl.appendChild(el);
-  const ent = { char: ch, x, y, kind: 'scene', solid: false, def, el };
+  const ent = { char: ch, x, y, kind: 'scene', solid, def, el };
   state.entities.set(key(x, y), ent);
   return ent;
 }
@@ -1684,8 +1733,9 @@ function refreshSelfBlank() {
   el.classList.toggle('filled', state.player.x === p.x && state.player.y === p.y);
 }
 
-/* 把落在地上的字收进句子的空位，从此成为句子的一部分 */
-function absorbIntoBlank(ent, pos) {
+/* 把落在地上的字收进句子的空位：它成为句子里的一个可交互实体，
+   像墙一样挡路，但可以再拾取回来 */
+function absorbIntoBlank(ent, pos, slot) {
   const fromTx = ent.x * CELL, fromTy = ent.y * CELL;
   state.entities.delete(key(ent.x, ent.y));
 
@@ -1694,15 +1744,35 @@ function absorbIntoBlank(ent, pos) {
   if (occ && occ !== ent) { removeEntity(occ); state.bag.push(occ.char); renderBag(); }
 
   ent.x = pos.x; ent.y = pos.y;
-  ent.kind = 'scene'; ent.solid = false;
-  ent.def = { kind: 'scene', solid: false, say: true };
-  ent.el.className = 'cell-char scene say';
+  ent.kind = 'entity'; ent.solid = true;
+  ent.saySlot = slot;
+  ent.def = {
+    kind: 'entity', solid: true, say: true,
+    sub: '它嵌在那句话里，可以取回来',
+    pickable: true,
+    dismantle: null, dismantleWhy: '嵌在句子里，拆不开',
+  };
+  ent.el.className = 'cell-char entity say-filled';
   state.entities.set(key(pos.x, pos.y), ent);
   setPos(ent.el, pos.x, pos.y);
   ent.el.animate([
     { transform: `translate(${fromTx}px, ${fromTy}px)` },
     { transform: `translate(${pos.x * CELL}px, ${pos.y * CELL}px)` },
   ], { duration: 520, easing: 'cubic-bezier(.25,.7,.3,1)', fill: 'backwards' });
+}
+
+/* 把句子里的字取回后，空位重新露出来，可以再填 */
+function reopenSayBlank(slot, x, y) {
+  if (slot === 'one') {
+    state.flags.sayBlank = true;
+    state.flags.sayBlankPos = { x, y };
+    state.flags.sayFormed = false;
+    spawnSayBlank(x, y, '');
+  } else {
+    state.flags.sayBlank2 = true;
+    state.flags.sayBlank2Pos = { x, y };
+    spawnSayBlank(x, y, 'say-blank-ask');
+  }
 }
 
 /* 放到地上的字，正好是那句话缺的答案：让它落进空位。
@@ -1713,8 +1783,9 @@ function checkSayAnswer(char, ent) {
     state.flags.sayBlank = false;
     sfx.combine();
     mapEl.querySelectorAll('.say-blank:not(.say-blank-self)').forEach(el => el.remove());
-    absorbIntoBlank(ent, state.flags.sayBlankPos);
+    absorbIntoBlank(ent, state.flags.sayBlankPos, 'one');
     later(() => {
+      if (state.flags.sayBlank) return;   // 已被取回，空位重新空着
       state.flags.sayFormed = true;
       checkSayComplete(true);
     }, 560);
@@ -1726,11 +1797,11 @@ function checkSayAnswer(char, ent) {
     state.flags.sayBlank2 = false;
     sfx.combine();
     mapEl.querySelectorAll('.say-blank-ask').forEach(el => el.remove());
-    absorbIntoBlank(ent, state.flags.sayBlank2Pos);
-    /* 补进句子的只是那个字；实物仍旧归你 */
-    state.bag.push(char);
-    renderBag();
-    later(() => askBranch(char), 700);
+    absorbIntoBlank(ent, state.flags.sayBlank2Pos, 'two');
+    later(() => {
+      if (state.entities.get(key(ent.x, ent.y)) !== ent) return;   // 已被取回
+      askBranch(char);
+    }, 700);
     return true;
   }
 
@@ -1745,14 +1816,12 @@ function askBranch(char) {
   }
   if (char === '斧') {
     narrate('“！好主意。”');
-    later(() => narrate('“用斧头破墙试试！”'), 1300);
-    if (!state.player.held) setHeld('斧');
+    later(() => narrate('“用斧头破墙试试！”——斧头就嵌在那句话里，取下来就能用。'), 1300);
     return;
   }
   if (char === '钻') {
-    narrate('“钻头……”墙里的声音低了下去，像在屏息等你。你把钻头握进了手里。');
+    narrate('“钻头……”墙里的声音低了下去，像在屏息等你。钻头嵌在那句话里，取下来就能用。');
     state.flags.drillReady = true;
-    if (!state.player.held) setHeld('钻');
   }
 }
 
@@ -1771,10 +1840,14 @@ function checkSayComplete(announceMiss) {
   state.flags.sayDone = true;
   sfx.combine();
 
-  /* 主角站定的这一瞬，“我”就留在句子里了 */
+  /* 主角站定的这一瞬，“我”就留在句子里了（这一格不挡路，主角正站着） */
   const self = state.flags.saySelfPos;
   mapEl.querySelectorAll('.say-blank-self').forEach(el => el.remove());
-  spawnSayChar('我', self.x, self.y);
+  spawnSayChar('我', self.x, self.y, false);
+
+  /* 这句话已经说出口，句中的“困”不再能取回 */
+  const ku = [...state.entities.values()].find(e => e.saySlot === 'one');
+  if (ku) ku.def = { ...ku.def, pickable: false, pickableWhy: '这句话已经说出口了' };
 
   narrate('你站进了那个空位——“我被困住了。”这一次，是整句话。墙里静了很久，那个声音才慢慢应你：“别急！我可以帮你想想……”');
   later(transformToAsk, 3200);   // 那句话落下，屋里这句又变了
