@@ -142,6 +142,16 @@ html, body {
 /* 场景字：灰暗、安静 */
 .cell-char.scene { color: #55555f; }
 .cell-char.grass { color: #3d4f3c; font-size: 20px; }
+/* 钻开的洞：墙面上缺了一块，透着外面更深的黑 */
+.cell-char.hole {
+  color: #2f2f33;
+  text-shadow: 0 0 10px rgba(0, 0, 0, .95);
+  animation: holeFade 3s ease-in-out infinite;
+}
+@keyframes holeFade {
+  0%, 100% { opacity: .55; }
+  50%      { opacity: .9; }
+}
 
 /* 可交互实体：淡金色呼吸光 */
 .cell-char.entity {
@@ -631,7 +641,12 @@ let COLS = 0, ROWS = 0;
    kind: scene 非交互场景字 / entity 可交互实体字
    ============================================================ */
 const CHARS = {
-  '墙': { kind: 'scene', solid: true },
+  '墙': { kind: 'scene', solid: true,
+         /* 手持“斧”“钻”撞墙，各有各的结果 */
+         combine: {
+           '斧': { action: 'axeWall' },
+           '钻': { action: 'drillWall' },
+         } },
   '草': { kind: 'scene', solid: false, grass: true },
   '树': { kind: 'scene', solid: true },
 
@@ -682,6 +697,9 @@ const CHARS = {
   '听': { kind: 'entity', solid: true, sub: '它能听见墙里的动静',
          pickable: true,
          dismantle: ['口', '斤'] },
+  '钻': { kind: 'entity', solid: true, sub: '锋利的钻头',
+         pickable: true,
+         dismantle: ['钅', '占'] },
 
   '门': { kind: 'entity', solid: true, cls: 'door', portal: true, sub: '门后是另一间屋子',
          pickable: false, pickableWhy: '门不是拿来拿的',
@@ -1134,10 +1152,8 @@ function tryMove(dx, dy) {
       return;
     }
     bumpFx(dx, dy, target);
-    if (target.kind === 'scene') { onBumpScene(target); return; }
-    if (target.def.portal) { gotoLevel(state.levelIndex + 1); return; }
 
-    /* 可交互实体：手持物配方 > 击打 > 合体 > 火 > 对话框 */
+    /* 手持物配方优先：墙也会对“斧”“钻”有反应 */
     const held = state.player.held;
     if (held && target.def.combine && target.def.combine[held]) {
       const res = target.def.combine[held];
@@ -1145,8 +1161,15 @@ function tryMove(dx, dy) {
       else if (res.action === 'break') breakWithAxe(target, res);
       else if (res.action === 'ignite') igniteWood(held, target, res);
       else if (res.action === 'melt') meltIce(held, target);
+      else if (res.action === 'axeWall') axeWall(target);
+      else if (res.action === 'drillWall') drillWall(target);
       return;
     }
+
+    if (target.kind === 'scene') { onBumpScene(target); return; }
+    if (target.def.portal) { gotoLevel(state.levelIndex + 1); return; }
+
+    /* 可交互实体：击打 > 合体 > 火 > 对话框 */
     if (held && target.def.strike && target.def.strike.with === held) {
       strikeEntity(target);
       return;
@@ -1698,19 +1721,39 @@ function checkSayAnswer(char, ent) {
     return true;
   }
 
-  /* 第二句：“你有石头吗”缺“石” */
-  if (state.flags.sayBlank2 && char === '石') {
+  /* 第二句：“你有＿头吗”有三个答案：石 / 斧 / 钻 */
+  if (state.flags.sayBlank2 && (char === '石' || char === '斧' || char === '钻')) {
     state.flags.sayBlank2 = false;
     sfx.combine();
     mapEl.querySelectorAll('.say-blank-ask').forEach(el => el.remove());
     absorbIntoBlank(ent, state.flags.sayBlank2Pos);
-    later(() => {
-      narrate('“你有石头吗？”——石头落进那句话里。墙里静了一瞬，那个声音忽然近了：“石头……把它递进来。”');
-    }, 560);
+    /* 补进句子的只是那个字；实物仍旧归你 */
+    state.bag.push(char);
+    renderBag();
+    later(() => askBranch(char), 700);
     return true;
   }
 
   return false;
+}
+
+/* “你有＿头吗”的三种回答，各走一条路 */
+function askBranch(char) {
+  if (char === '石') {
+    narrate('墙里那声音顿了顿：“用石头来砸墙似乎没有用……”');
+    return;
+  }
+  if (char === '斧') {
+    narrate('“！好主意。”');
+    later(() => narrate('“用斧头破墙试试！”'), 1300);
+    if (!state.player.held) setHeld('斧');
+    return;
+  }
+  if (char === '钻') {
+    narrate('“钻头……”墙里的声音低了下去，像在屏息等你。你把钻头握进了手里。');
+    state.flags.drillReady = true;
+    if (!state.player.held) setHeld('钻');
+  }
 }
 
 /* 完整条件：句子拼齐（“困”就位）＋ 主角站进“我”的空位 */
@@ -1760,6 +1803,39 @@ function transformToAsk() {
     }
   });
   narrate('“别急！我可以帮你想想……”的话音还没散，屋里那句话忽然自己变了——“你有　头吗？”');
+}
+
+/* 斧砍墙：看着有力，其实毫无作用 */
+function axeWall(target) {
+  target.el.classList.add('flash');
+  later(() => target.el.classList.remove('flash'), 260);
+  narrate('斧刃砍在墙上，只崩下一星碎屑——墙纹丝不动。');
+}
+
+/* 钻墙：墙面被钻穿，留下一个能走进去的洞 */
+function drillWall(target) {
+  if (!state.flags.drillReady) {   // 还没对上那句“你有钻头吗”，钻头转不起来
+    narrate('钻头顶在墙上，转不起来——你还没想好拿它做什么。');
+    return;
+  }
+  if (state.animating) return;
+  state.animating = true;
+  sfx.combine();
+  target.el.classList.add('flash');
+  later(() => {
+    removeEntity(target);
+    const el = document.createElement('div');
+    el.className = 'cell-char scene hole';
+    el.textContent = '洞';
+    setPos(el, target.x, target.y);
+    mapEl.appendChild(el);
+    state.entities.set(key(target.x, target.y), {
+      char: '洞', x: target.x, y: target.y, kind: 'scene', solid: false,
+      def: { kind: 'scene', solid: false }, el,
+    });
+    narrate('钻头咬穿墙面，碎屑簌簌落下——墙被钻开了一个洞。洞的那边，隐约还有另一间屋子。');
+    state.animating = false;
+  }, 420);
 }
 
 /* 斧击石：每击一次石亮 20%，第三击石上生火，石恢复原亮度 */
