@@ -181,10 +181,18 @@ html, body {
   text-shadow: 0 0 14px rgba(126, 182, 214, .35);
 }
 
-/* 烧着的“木”：仍是木，只是红了 */
-.cell-char.lit-wood {
+/* “木”的三种成色：没烧过是棕色，烧着了是红色，被冰浇灭后发灰 */
+.cell-char.wood-color-wood, .bag-slot.wood-color-wood, #held-char.wood-color-wood {
+  color: #b08153;
+  text-shadow: 0 0 10px rgba(176, 129, 83, .45);
+}
+.cell-char.wood-color-lit, .bag-slot.wood-color-lit, #held-char.wood-color-lit {
   color: #ff6a45;
   text-shadow: 0 0 14px rgba(255, 90, 50, .85);
+}
+.cell-char.wood-color-ash, .bag-slot.wood-color-ash, #held-char.wood-color-ash {
+  color: #8a8a86;
+  text-shadow: 0 0 8px rgba(150, 150, 145, .22);
 }
 
 /* 声：从墙外飞进来、一路飘散的响动 */
@@ -192,64 +200,31 @@ html, body {
   position: absolute;
   left: 0; top: 0;
   z-index: 5;
-  font-size: 17px;
-  letter-spacing: 2px;
-  white-space: nowrap;
+  font-size: 22px;
   color: #9fb2c8;
   text-shadow: 0 0 14px rgba(160, 190, 220, .6);
   pointer-events: none;
   will-change: left, top, opacity;
 }
 
-/* 放大听力后，“声”化成的一句话 */
-.whisper {
-  position: absolute;
-  left: 50%; top: 50%;
-  width: 84%;
-  transform: translate(-50%, -50%) scale(.96);
-  text-align: center;
-  font-size: 19px;
-  line-height: 1.9;
-  letter-spacing: 2px;
-  color: #c8d2e0;
-  text-shadow: 0 0 18px rgba(160, 190, 230, .55);
-  opacity: 0;
-  transition: opacity .9s ease, transform .9s ease;
-  pointer-events: none;
-  z-index: 42;
+/* 主角说出口的话：落在屋里的场景字，非交互、踩得过去 */
+.cell-char.say {
+  color: #e6e1d0;
+  text-shadow: 0 0 14px rgba(215, 220, 235, .5);
+  z-index: 2;
 }
-.whisper.show { opacity: .92; transform: translate(-50%, -50%) scale(1); }
-
-/* 主角的回应：一句缺了一个字的话，等玩家从行囊里挑字填进去 */
-.respond {
-  position: absolute;
-  left: 50%; top: 27%;
-  transform: translate(-50%, -50%);
-  font-size: 23px;
-  letter-spacing: 3px;
-  white-space: nowrap;
-  color: #ece5d2;
-  text-shadow: 0 0 20px rgba(210, 220, 240, .55);
-  opacity: 0;
-  transition: opacity .8s ease;
-  pointer-events: none;
-  z-index: 42;
+/* 话里缺的那个字：空位上一道浅痕，等答案落进来 */
+.cell-char.say-blank {
+  color: #6f6a55;
+  z-index: 2;
+  animation: sayBlankPulse 1.6s ease-in-out infinite;
 }
-.respond.show { opacity: .96; }
-.respond .blank {
-  display: inline-block;
-  min-width: 1.15em;
-  height: 1.15em;
-  margin: 0 2px;
-  border-bottom: 2px solid #c8b184;
-  color: #ffd27a;
-  text-align: center;
-  animation: blankPulse 1.6s ease-in-out infinite;
+@keyframes sayBlankPulse {
+  0%, 100% { opacity: .35; }
+  50%      { opacity: 1; text-shadow: 0 0 12px rgba(216, 199, 138, .6); }
 }
-@keyframes blankPulse {
-  50% { border-bottom-color: #ffd27a; text-shadow: 0 0 16px rgba(255, 210, 122, .95); }
-}
-.respond.filled .blank { animation: none; border-bottom-color: transparent; }
+/* “我”那一格由主角亲自站进去，空痕便让位给主角 */
+.cell-char.say-blank.filled { opacity: 0 !important; animation: none; }
 
 /* 门：通往下一间屋子 */
 .cell-char.door {
@@ -306,10 +281,6 @@ html, body {
   color: #d8c78a;
   text-shadow: 0 0 8px rgba(216, 199, 138, .8);
   animation: breathe 2s ease-in-out infinite;
-}
-#held-char.lit {
-  color: #ff6a45;
-  text-shadow: 0 0 12px rgba(255, 90, 50, .95);
 }
 
 /* ---------- 叙述栏 ---------- */
@@ -432,20 +403,6 @@ html, body {
   right: 2px; top: 2px;
   font-size: 10px;
   color: #d8c78a;
-}
-.bag-slot.lit {
-  color: #ff6a45;
-  border-color: rgba(255, 106, 69, .45);
-  text-shadow: 0 0 12px rgba(255, 90, 50, .7);
-}
-/* 填空：行囊里每个字都亮起来，等玩家挑一个填进那句话 */
-.bag-slot.fillable {
-  border-color: #c8b184;
-  animation: slotPulse 1.5s ease-in-out infinite;
-}
-@keyframes slotPulse {
-  0%, 100% { box-shadow: 0 0 0 rgba(200, 177, 132, 0); }
-  50%      { box-shadow: 0 0 16px rgba(200, 177, 132, .7), 0 0 10px rgba(200, 177, 132, .35) inset; }
 }
 #bag-empty {
   grid-column: 1 / -1;
@@ -1045,7 +1002,7 @@ function loadLevel(i) {
   clearTimers();
   clearInterval(typeTimer);
   document.querySelectorAll('.fly-char').forEach(el => el.remove());
-  mapEl.querySelectorAll('.whisper, .sound-fly, .respond').forEach(el => el.remove());
+  mapEl.querySelectorAll('.sound-fly').forEach(el => el.remove());
   $('overlay').classList.remove('show');
   $('death-overlay').classList.remove('show');
   $('dis-stage').querySelectorAll('.dis-part').forEach(p => p.remove());
@@ -1504,6 +1461,7 @@ function breakWithAxe(target, res) {
 /* 木凑进火里：木被点燃，还是那块“木”，只是烧红了 */
 function igniteWood(heldChar, target) {
   if (state.flags.litWood) { narrate('“木”已经烧着了，火苗正旺。'); return; }
+  if (state.flags.ashWood) { narrate('“木”被冰水浸透了，再也点不着。'); return; }
   state.animating = true;
   sfx.fire();
 
@@ -1527,7 +1485,7 @@ function igniteWood(heldChar, target) {
 }
 
 /* 烧着的木贴上冰：冰塌成一摊水（无实体背景），水里浮出一个“口”，
-   左下的墙里渗出一声“有人吗”；木被浇灭，还是那块木，不消失。 */
+   左下的墙里渗出一声“声”；木被浇灭，还是那块木，不消失。 */
 function meltIce(heldChar, target) {
   if (!state.flags.litWood) { narrate('一块冷木贴上去，冰纹丝不动。'); return; }
   state.animating = true;
@@ -1551,13 +1509,14 @@ function meltIce(heldChar, target) {
       const kou = spawnCharEntity('口', kx, ty);
       popIn(kou, kx, ty);
       spawnSound();
-      /* 冰把火浇灭了：木还是那块木，原样飞回手上 */
+      /* 冰把火浇灭了：木还是那块木，只是浸成了灰色 */
       state.flags.litWood = false;
+      state.flags.ashWood = true;
       flyChar(heldChar, to, P(playerEl.getBoundingClientRect()), 360, () => {
         setHeld(heldChar);
         state.animating = false;
       }, 26);
-      narrate('冰塌成一摊水，水里浮出一个“口”。手里的“木”被浇灭了，还是那块木。与此同时，左下的墙里，传来一声极轻的“有人吗”。');
+      narrate('冰塌成一摊水，水里浮出一个“口”。手里的“木”被浇灭了，还是那块木。与此同时，左下的墙里，渗出一声极轻的“声”。');
     }, 480);
   }, 22);
 }
@@ -1572,11 +1531,11 @@ function spawnWater(x, y) {
   state.waterCells.add(key(x, y));
 }
 
-/* 一点“有人吗”从墙外飘进来：飞向 (ex, ey)，途中渐渐消散 */
+/* 一点“声”从墙外飞进来：飞向 (ex, ey)，途中渐渐消散 */
 function flySoundTo(ex, ey, duration, onDone) {
   const el = document.createElement('div');
   el.className = 'sound-fly';
-  el.textContent = '有人吗';
+  el.textContent = '声';
   mapEl.appendChild(el);
 
   const sx = -CELL * .5;
@@ -1613,69 +1572,101 @@ function amplifyHearing() {
   if (state.flags.heard || !state.flags.soundSpawned) return;
   state.flags.heard = true;
   sfx.combine();
-  mapEl.querySelectorAll('.sound-fly').forEach(el => el.remove());   // 收起循环中的声音
+  mapEl.querySelectorAll('.sound-fly').forEach(el => el.remove());   // 收起循环中的声
 
-  flySoundTo(COLS * CELL / 2, ROWS * CELL / 2, 900, () => {
-    showWhisper('“有人吗……”');
-    narrate('“听”放大了那点声响——墙里有人在问，一遍，又一遍：“有人吗？”');
-    later(startRespond, 2400);
+  narrate('“有人吗？”');          // 墙里的声音，落在下方对话框里
+  later(startSay, 2000);           // 停顿两秒，主角再回应
+}
+
+/* 主角喊回去：“我被＿住了”——每个字落进屋里，都是非交互的场景字；
+   唯独中间那个字空着，等玩家把答案放到地上 */
+function startSay() {
+  if (state.flags.sayShown || state.dead) return;
+  state.flags.sayShown = true;
+
+  const chars = ['我', '被', null, '住', '了'];   // null = 缺的那个字
+  const spot = findSaySpot(chars.length);
+  if (!spot) return;   // 屋里实在摆不下（几乎不可能），保持沉默
+  chars.forEach((ch, i) => {
+    const x = spot.x + i, y = spot.y;
+    if (ch) {
+      popIn(spawnSayChar(ch, x, y), x, y);
+    } else {
+      state.flags.sayBlank = true;
+      state.flags.sayBlankPos = { x, y };
+      spawnSayBlank(x, y);
+    }
   });
+  narrate('你朝着墙里喊了回去——“我被　住了。”字一个个落进屋里；唯独中间那个字，你还没有。');
 }
 
-/* 主角回应墙里的声音：话说到一半，缺了一个字 */
-function startRespond() {
-  if (state.flags.responded || state.flags.fillMode || state.dead) return;
-  state.flags.fillMode = true;
-  mapEl.querySelectorAll('.whisper').forEach(el => el.remove());
-
-  const el = document.createElement('div');
-  el.id = 'respond-line';
-  el.className = 'respond';
-  el.innerHTML = '我被<span class="blank"></span>在这里了';
-  mapEl.appendChild(el);
-  requestAnimationFrame(() => el.classList.add('show'));
-
-  if (!state.bagOpen) toggleBag(true);
-  renderBag();
-  narrate('你张了张嘴，回应墙里的声音——话到嘴边，却缺了一个字。到行囊里挑一个字，填进去。');
-}
-
-/* 行囊里选字填空：只有“困”能塞进那句话。
-   点别的字不会白点——照常拿在手上，方便玩家先去把字合出来。 */
-function tryFill(char) {
-  if (!state.flags.fillMode) return;
-  if (char !== '困') {
-    sfx.bump();
-    const willHold = state.player.held !== char;
-    setHeld(willHold ? char : null);
-    narrate(willHold
-      ? `“${char}”填不进那句话——那句话还缺着一个字。你把它拿在了手上。`
-      : `“${char}”填不进那句话——那句话，还缺着一个字。`);
-    return;
+/* 在屋里找一排连续的空位，把那句话放在那儿 */
+function findSaySpot(len) {
+  const rows = [4, 3, 5, 2, 6, 1, 7].filter(r => r > 0 && r < ROWS - 1);
+  for (const y of rows) {
+    for (let x = 1; x + len <= COLS - 1; x++) {
+      let ok = true;
+      for (let i = 0; i < len; i++) {
+        if (entityAt(x + i, y)) { ok = false; break; }
+        if (state.player.x === x + i && state.player.y === y) { ok = false; break; }
+      }
+      if (ok) return { x, y };
+    }
   }
+  return null;
+}
 
-  state.flags.fillMode = false;
-  state.flags.responded = true;
+function spawnSayChar(ch, x, y) {
+  const def = { kind: 'scene', solid: false };
+  const el = document.createElement('div');
+  el.className = 'cell-char scene say';
+  el.textContent = ch;
+  setPos(el, x, y);
+  mapEl.appendChild(el);
+  const ent = { char: ch, x, y, kind: 'scene', solid: false, def, el };
+  state.entities.set(key(x, y), ent);
+  return ent;
+}
+
+/* 空位：不占实体格，只是一道等人来填的浅痕 */
+function spawnSayBlank(x, y) {
+  const el = document.createElement('div');
+  el.className = 'cell-char say-blank';
+  el.textContent = '_';
+  setPos(el, x, y);
+  mapEl.appendChild(el);
+}
+
+/* 放到地上的字，正好是那句话缺的答案：让它落进空位 */
+function checkSayAnswer(char, ent) {
+  if (!state.flags.sayBlank || char !== '困') return;
+  state.flags.sayBlank = false;
   sfx.combine();
 
-  const line = $('respond-line');
-  if (line) {
-    line.querySelector('.blank').textContent = '困';
-    line.classList.add('filled');
-    later(() => line.classList.remove('show'), 3600);
-  }
-  renderBag();
-  narrate('“我被困在这里了。”——墙里静了很久，那个声音才低低地应了一声。');
-  later(() => showWhisper('“……我也是。”'), 1600);
-}
+  const pos = state.flags.sayBlankPos;
+  const fromTx = ent.x * CELL, fromTy = ent.y * CELL;
+  state.entities.delete(key(ent.x, ent.y));
+  mapEl.querySelectorAll('.say-blank').forEach(el => el.remove());
 
-function showWhisper(text) {
-  mapEl.querySelectorAll('.whisper').forEach(el => el.remove());
-  const el = document.createElement('div');
-  el.className = 'whisper';
-  el.textContent = text;
-  mapEl.appendChild(el);
-  requestAnimationFrame(() => el.classList.add('show'));
+  /* 空位若被先前放下的字占住，先把占位的字退回行囊 */
+  const occ = entityAt(pos.x, pos.y);
+  if (occ && occ !== ent) { removeEntity(occ); state.bag.push(occ.char); renderBag(); }
+
+  /* 这个字从此是场景的一部分：非交互，踩得过去 */
+  ent.x = pos.x; ent.y = pos.y;
+  ent.kind = 'scene'; ent.solid = false;
+  ent.def = { kind: 'scene', solid: false };
+  ent.el.className = 'cell-char scene say';
+  state.entities.set(key(pos.x, pos.y), ent);
+  setPos(ent.el, pos.x, pos.y);
+  ent.el.animate([
+    { transform: `translate(${fromTx}px, ${fromTy}px)` },
+    { transform: `translate(${pos.x * CELL}px, ${pos.y * CELL}px)` },
+  ], { duration: 520, easing: 'cubic-bezier(.25,.7,.3,1)', fill: 'backwards' });
+
+  later(() => {
+    narrate('“困”落进那句话里——我被困住了。墙里静了很久，那个声音忽然一字一顿地回你：“别急，我来救你！”');
+  }, 560);
 }
 
 /* 斧击石：每击一次石亮 20%，第三击石上生火，石恢复原亮度 */
@@ -1888,6 +1879,19 @@ const genericDropDef = char => ({
   pickable: true, dismantle: null, dismantleWhy: '拆无可拆',
 });
 
+/* “木”的成色：本色棕 / 烧红 / 浇灭后发灰 */
+const WOOD_CLASSES = ['wood-color-wood', 'wood-color-lit', 'wood-color-ash'];
+function woodColorClass() {
+  if (state.flags.litWood) return 'wood-color-lit';
+  if (state.flags.ashWood) return 'wood-color-ash';
+  return 'wood-color-wood';
+}
+function applyWoodColor(el, char) {
+  if (!el) return;
+  el.classList.remove(...WOOD_CLASSES);
+  if (char === '木') el.classList.add(woodColorClass());
+}
+
 function spawnCharEntity(char, x, y) {
   const def = CHARS[char] || genericDropDef(char);
   const el = document.createElement('div');
@@ -1895,6 +1899,7 @@ function spawnCharEntity(char, x, y) {
     (def.kind === 'scene' ? (def.grass ? 'grass' : 'scene') : (def.chain ? 'chain' : 'entity')) +
     (def.cls ? ' ' + def.cls : '');
   el.textContent = char;
+  applyWoodColor(el, char);
   setPos(el, x, y);
   mapEl.appendChild(el);
   const ent = { char, x, y, kind: def.kind, solid: def.solid, def, el };
@@ -1941,13 +1946,12 @@ function dropChar(char, fromRect) {
   if (isHeld) {
     state.player.held = null;
     $('held-char').textContent = '';
-    $('held-char').classList.remove('lit');
+    $('held-char').classList.remove(...WOOD_CLASSES);
   }
   renderBag();
   sfx.open();
 
   const ent = spawnCharEntity(char, cell.x, cell.y);
-  if (char === '木' && state.flags.litWood) ent.el.classList.add('lit-wood');
   ent.el.style.opacity = 0;
   const er = ent.el.getBoundingClientRect();
   const pr = playerEl.getBoundingClientRect();
@@ -1964,6 +1968,7 @@ function dropChar(char, fromRect) {
       { transform: `translate(${tx}, ${ty}) scale(.94)`, opacity: 1, offset: .6 },
       { transform: `translate(${tx}, ${ty}) scale(1)`, opacity: 1 },
     ], { duration: 360, easing: 'cubic-bezier(.2,.8,.3,1)' });
+    checkSayAnswer(char, ent);   // 落进空里的字，可能正是那句话缺的答案
   });
 
   completeStep('drop');
@@ -1979,15 +1984,12 @@ function renderBag() {
   }
   state.bag.forEach(char => {
     const slot = document.createElement('div');
-    slot.className = 'bag-slot' + (state.player.held === char ? ' held' : '') +
-                     (char === '木' && state.flags.litWood ? ' lit' : '') +
-                     (state.flags.fillMode ? ' fillable' : '');
+    slot.className = 'bag-slot' + (state.player.held === char ? ' held' : '');
     slot.textContent = char;
-    slot.title = state.flags.fillMode ? '选一个字填进去 · 其他字会拿在手上'
-                                      : '左键手持 · 右键放下';
+    applyWoodColor(slot, char);
+    slot.title = '左键手持 · 右键放下';
     slot.onclick = () => {
       openVision();
-      if (state.flags.fillMode) { tryFill(char); return; }
       setHeld(state.player.held === char ? null : char);
       if (state.player.held) completeStep('hold');
       sfx.open();
@@ -2005,7 +2007,7 @@ function setHeld(char) {
   state.player.held = char;
   const hc = $('held-char');
   hc.textContent = char || '';
-  hc.classList.toggle('lit', char === '木' && state.flags.litWood);
+  applyWoodColor(hc, char);
   renderBag();
 
   /* 已站在左下角时再拿起“听”，同样放大听力 */
