@@ -710,6 +710,12 @@ const CHARS = {
          dismantle: null, dismantleWhy: '浑然一块，没有缝隙',
          strike: { with: '斧', hits: 3, spawn: '火' } },   // 斧击三下，石上生火
 
+  /* 木：除了被“火”点燃，还能被“钻”钻出火来——另一条生火的路 */
+  '木': { kind: 'entity', solid: true, sub: '一块木头，纹路还新',
+         pickable: true,
+         dismantle: null, dismantleWhy: '木，拆不开',
+         combine: { '钻': { action: 'drillWood' } } },
+
   '冰': { kind: 'entity', solid: true, sub: '它冷得发白，边缘挂着水汽',
          pickable: false, pickableWhy: '冰，搬不动',
          dismantle: null, dismantleWhy: '冰，一拆就碎',
@@ -1195,12 +1201,21 @@ function tryMove(dx, dy) {
       else if (res.action === 'ignite') igniteWood(held, target, res);
       else if (res.action === 'melt') meltIce(held, target);
       else if (res.action === 'axeWall') axeWall(target);
+      else if (res.action === 'drillWood') drillWood(target);
       return;
     }
 
     /* 钻头只认带裂缝的墙；普通墙撞上去什么也不会发生，也不提醒 */
     if (held === '钻' && target.char === '墙') {
       if (target.cracked) drillWall(target);
+      return;
+    }
+
+    /* 冰：撞上去先听见一声；手持“钻”会被劝住，改走温和的化冰方式 */
+    if (target.char === '冰') {
+      narrate(held === '钻'
+        ? '这样似乎会破坏冰里的东西，还是采取更温和的方式吧。'
+        : '冰里似乎有什么东西……');
       return;
     }
 
@@ -1239,10 +1254,11 @@ function movePlayer(nx, ny, underEntity) {
     if (underEntity.char === '灭') completeStep('pass');   // 穿过灭
   }
 
-  /* 左下角：带着“听”才听得见；空着手，只有一片听不见的动静 */
+  /* 左下角：带着“听”才听得见；空着手，只有一片听不见的动静。
+     已经用“听”听见过一次之后，这句话就再也不提了。 */
   if (nx === 1 && ny === ROWS - 2) {
     if (state.player.held === '听') amplifyHearing();
-    else {
+    else if (!state.flags.heard) {
       const now = Date.now();
       if (now - (state.flags.cornerHintAt || 0) > 4000) {   // 反复进出不刷屏
         state.flags.cornerHintAt = now;
@@ -1563,6 +1579,32 @@ function igniteWood(heldChar, target) {
         narrate('“木”伸进火里，噼啪一声——它烧起来了。');
       }, 26);
     }, 380);
+  }, 22);
+}
+
+/* 钻木取火：手持“钻”撞向地上的“木”，钻头飞转带出火星，木燃成一团“火”。
+   与斧击石生出的火完全一样——20 秒内不灭，照样会蔓延。 */
+function drillWood(target) {
+  if (state.animating) return;
+  state.animating = true;
+  sfx.combine();
+
+  const P = r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  const from = P(playerEl.getBoundingClientRect());
+  const to = P(target.el.getBoundingClientRect());
+  const tx = target.x, ty = target.y;
+
+  flyChar('钻', from, to, 360, () => {
+    target.el.classList.add('flash');
+    sfx.fire();
+    later(() => {
+      removeEntity(target);
+      spawnFire(tx, ty, '火');
+      flyChar('钻', to, P(playerEl.getBoundingClientRect()), 360, () => {
+        state.animating = false;
+        narrate('“钻”抵住“木”，飞旋、发热——一星红亮从木屑里蹦出来，整块“木”烧成了一团“火”。');
+      }, 22);
+    }, 420);
   }, 22);
 }
 
@@ -1907,6 +1949,9 @@ function drillWall(target) {
       def: { kind: 'scene', solid: false }, el,
     });
     narrate('钻头咬穿墙面，碎屑簌簌落下——墙被钻开了一个洞。洞的那边，隐约还有另一间屋子。');
+    /* 墙已经钻穿，那句话的答案也就不必再填了——空位就此封上 */
+    state.flags.sayBlank2 = false;
+    mapEl.querySelectorAll('.say-blank-ask').forEach(el => el.remove());
     state.animating = false;
   }, 420);
 }
