@@ -1262,7 +1262,7 @@ function movePlayer(nx, ny, underEntity) {
       const now = Date.now();
       if (now - (state.flags.cornerHintAt || 0) > 4000) {   // 反复进出不刷屏
         state.flags.cornerHintAt = now;
-        narrate('听不见……墙里明明有声音，我却什么也听不清。');
+        narrate('……墙里明明有声音，我却什么也听不清。');
       }
     }
   }
@@ -1559,7 +1559,7 @@ function breakWithAxe(target, res) {
 /* 木凑进火里：木被点燃，还是那块“木”，只是烧红了 */
 function igniteWood(heldChar, target) {
   if (state.flags.litWood) { narrate('“木”已经烧着了，火苗正旺。'); return; }
-  if (state.flags.ashWood) { narrate('“木”被冰水浸透了，再也点不着。'); return; }
+  if (state.flags.ashWood) { narrate('“木”被冰水浸透了。'); return; }
   state.animating = true;
   sfx.fire();
 
@@ -1634,7 +1634,6 @@ function meltIce(heldChar, target) {
       }
       const kou = spawnCharEntity('口', kx, ty);
       popIn(kou, kx, ty);
-      spawnSound();
       /* 冰把火浇灭了：木还是那块木，只是浸成了灰色 */
       state.flags.litWood = false;
       state.flags.ashWood = true;
@@ -1642,7 +1641,12 @@ function meltIce(heldChar, target) {
         setHeld(heldChar);
         state.animating = false;
       }, 26);
-      narrate('冰塌成一摊水，水里浮出一个“口”。手里的“木”被浇灭了，还是那块木。与此同时，左下的墙里，渗出一声极轻的“声”。');
+      narrate('指尖粘稠拉丝，你意识到这团冰生前居然是口水！');
+      /* 隔3秒，左下墙里才渗出一声“声”——“声”字与这句话同时出现，不提前 */
+      later(() => {
+        narrate('与此同时，左下的墙里，渗出一声极轻的“声”。');
+        spawnSound();
+      }, 3000);
     }, 480);
   }, 22);
 }
@@ -1655,6 +1659,17 @@ function spawnWater(x, y) {
   setPos(el, x, y);
   mapEl.appendChild(el);
   state.waterCells.add(key(x, y));
+}
+
+/* 被火舌烤化的冰：直接塌成一摊水（不浮出“口”），这格从此也烧不进去 */
+function meltIceByFire(ice) {
+  const x = ice.x, y = ice.y;
+  removeEntity(ice);
+  spawnWater(x, y);
+  if (!state.flags.fireMeltHinted) {
+    state.flags.fireMeltHinted = true;
+    narrate('火舌舔上“冰”，冰面嘶嘶作响——它化开成了一摊水，火再没烧进去。');
+  }
 }
 
 /* 一点“声”从墙外飞进来：飞向 (ex, ey)，途中渐渐消散 */
@@ -1858,11 +1873,11 @@ function askBranch(char) {
   }
   if (char === '斧') {
     narrate('“！好主意。”');
-    later(() => narrate('“用斧头破墙试试！”——斧头就嵌在那句话里，取下来就能用。'), 1300);
+    later(() => narrate('“用斧头破墙试试！”'), 1300);
     return;
   }
   if (char === '钻') {
-    narrate('“钻头……”墙里的声音低了下去，像在屏息等你。钻头嵌在那句话里，取下来就能用。');
+    narrate('“钻头?那边的墙上刚好有个细小的裂缝！”');
     state.flags.drillReady = true;
   }
 }
@@ -1875,7 +1890,7 @@ function checkSayComplete(announceMiss) {
 
   refreshSelfBlank();
   if (state.player.x !== p.x || state.player.y !== p.y) {
-    if (announceMiss) narrate('“我被困住了。”——这句话还缺一个“我”。站到那个空位上去，它才成立。');
+    if (announceMiss) narrate('这句话还缺一个字才成立，是什么呢？');
     return;
   }
 
@@ -1891,8 +1906,8 @@ function checkSayComplete(announceMiss) {
   const ku = [...state.entities.values()].find(e => e.saySlot === 'one');
   if (ku) ku.def = { ...ku.def, pickable: false, pickableWhy: '这句话已经说出口了' };
 
-  narrate('你站进了那个空位——“我被困住了。”这一次，是整句话。墙里静了很久，那个声音才慢慢应你：“别急！我可以帮你想想……”');
-  later(transformToAsk, 3200);   // 那句话落下，屋里这句又变了
+  narrate('你站进了那个空位——“我被困住了。”墙里静了很久，那个声音才慢慢应你：“别急！我可以帮你想想……”');
+  later(transformToAsk, 5000);   // 那句话落下，屋里这句又变了
 }
 
 /* “我可以帮你想想”之后：整句话散开重排，变成墙里的反问——“你有＿头吗？” */
@@ -1917,7 +1932,7 @@ function transformToAsk() {
       spawnSayBlank(x, y, 'say-blank-ask');
     }
   });
-  narrate('“别急！我可以帮你想想……”的话音还没散，屋里那句话忽然自己变了——“你有　头吗？”');
+  narrate('话音还没散，屋里那句话忽然自己变了——“你有　头吗？”');
 }
 
 /* 斧砍墙：看着有力，其实毫无作用 */
@@ -2075,6 +2090,13 @@ function spreadFire() {
   let hitPlayer = false;
 
   targets.forEach(({ x, y }) => {
+    /* 火舌舔到“冰”：不管是烧到冰这一格，还是蔓延到冰旁边的格子，冰都会化成一摊水 */
+    for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const near = entityAt(x + dx, y + dy);
+      if (near && near.char === '冰') meltIceByFire(near);
+    }
+    if (state.waterCells.has(key(x, y))) return;   // 刚化开的水，火进不去
+
     const t = entityAt(x, y);
     if (t) removeEntity(t);            // 火过之处，字都被吞掉
     const ent = spawnCharEntity('火', x, y);
