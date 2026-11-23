@@ -3577,7 +3577,7 @@ function moveGhost(ghost, nx, ny) {
   tone(70, .14, 'sine', .018);
 }
 
-/* 鬼踏进“神”的光里：立刻散掉 */
+/* 鬼踏进“神”的光里：立刻散掉，Demo 到此结束 */
 function killGhost(ghost) {
   stopGhostHunt();
   sfx.combine();
@@ -3585,7 +3585,7 @@ function killGhost(ghost) {
   later(() => {
     if (state.entities.get(key(ghost.x, ghost.y)) !== ghost) return;   // 已切关
     removeEntity(ghost);
-    narrate('“鬼”撞进了“神”的光里，像一滴墨落进清水，散得干干净净。');
+    endDemo();
   }, 260);
 }
 
