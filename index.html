@@ -618,6 +618,16 @@ body.mirror-world #player .glyph {
   pointer-events: none;
   transform: translate(-50%, -50%);
 }
+/* 从手里爬走的“昆”：像虫子一样扭着爬向右上角 */
+.bug-char {
+  position: fixed;
+  z-index: 120;
+  font-size: 24px;
+  color: #bfa86e;
+  text-shadow: 0 0 12px rgba(191, 168, 110, .7);
+  pointer-events: none;
+  will-change: left, top, transform;
+}
 
 /* ---------- 被火烧死 ---------- */
 #death-overlay {
@@ -1025,12 +1035,13 @@ const CHARS = {
          dismantle: null, dismantleWhy: '拆不开' },
   '棍': { kind: 'entity', solid: true, sub: '一根光溜溜的木棍，握在手里正称手',
          pickable: true,
-         dismantle: null, dismantleWhy: '棍身结实，拆不开' },
+         dismantle: ['木', '昆'] },
   '地': { kind: 'entity', solid: true, sub: '一块沉实的“地”，被霜围着',
          pickable: true,
          dismantle: null, dismantleWhy: '地，拆不开' },
   '霜': { kind: 'scene', solid: false, cls: 'frost',
-         sub: '薄薄一层霜，踩上去会打滑' },
+         sub: '薄薄一层霜，踩上去会打滑',
+         combine: { '木': { action: 'meltFrost' } } },
 
   '门': { kind: 'entity', solid: true, cls: 'door', portal: true, sub: '门后是另一间屋子',
          pickable: false, pickableWhy: '门不是拿来拿的',
@@ -1148,6 +1159,7 @@ const LEVELS = [
     ],
     intro: '镜室。屋子比前两间都冷。“镜”立在北面，镜面蒙着一层白雾，照不出人。左上是“冰”，冰旁搁着一根“棍”。屋子正中，一块“地”被四面“霜”围着。东墙那扇“门”，纹丝不动。',
     mirrorFogged: true,   // 镜面蒙雾：得先给它一点“日”头
+    earthSoft: true,      // “地”初始没有碰撞箱，霜被烧红的木融化后才落定
     iceRelease: '关',     // 这块冰里沉着“关”，没有墙里的“声”
     doorLock: true,       // 拿着“开”，门才开
   },
@@ -1297,6 +1309,7 @@ function buildMap() {
       setPos(el, x, y);
       mapEl.appendChild(el);
       const ent = { char: ch, x, y, kind: def.kind, solid: def.solid, def, el };
+      if (ch === '地' && state.level.earthSoft) ent.solid = false;   // 初生的“地”还没有碰撞箱
       if (def.mirror) {   // 镜子：这一关开局可能蒙着雾
         ent.fogged = !!state.level.mirrorFogged;
         if (ent.fogged) el.classList.add('mirror-fogged');
@@ -1410,7 +1423,7 @@ function expandVisionToRoom() {
 function loadLevel(i) {
   clearTimers();
   clearInterval(typeTimer);
-  document.querySelectorAll('.fly-char').forEach(el => el.remove());
+  document.querySelectorAll('.fly-char, .bug-char').forEach(el => el.remove());
   mapEl.querySelectorAll('.sound-fly').forEach(el => el.remove());
   $('overlay').classList.remove('show');
   $('death-overlay').classList.remove('show');
@@ -1561,22 +1574,23 @@ function tryMove(dx, dy) {
 
   const target = entityAt(nx, ny);
   if (target) {
-    if (!target.solid) {            // 可穿过的字（草、灭）
+    const held = state.player.held;
+    /* 手持配方优先：连没有碰撞箱的字（如“霜”）也要先接住配方 */
+    const combo = held && target.def.combine && target.def.combine[held];
+    if (!target.solid && !combo) {   // 可穿过的字（草、灭、霜）
       movePlayer(nx, ny, target);
       return;
     }
     bumpFx(dx, dy, target);
 
-    /* 手持物配方优先：墙也会对“斧”有反应 */
-    const held = state.player.held;
-    if (held && target.def.combine && target.def.combine[held]) {
-      const res = target.def.combine[held];
-      if (typeof res === 'string') combineChars(held, target, res);
-      else if (res.action === 'break') breakWithAxe(target, res);
-      else if (res.action === 'ignite') igniteWood(held, target, res);
-      else if (res.action === 'melt') meltIce(held, target);
-      else if (res.action === 'axeWall') axeWall(target);
-      else if (res.action === 'drillWood') drillWood(target);
+    if (combo) {
+      if (typeof combo === 'string') combineChars(held, target, combo);
+      else if (combo.action === 'break') breakWithAxe(target, combo);
+      else if (combo.action === 'ignite') igniteWood(held, target, combo);
+      else if (combo.action === 'melt') meltIce(held, target);
+      else if (combo.action === 'meltFrost') meltFrost(held, target);
+      else if (combo.action === 'axeWall') axeWall(target);
+      else if (combo.action === 'drillWood') drillWood(target);
       return;
     }
 
@@ -1677,12 +1691,12 @@ function movePlayer(nx, ny, underEntity) {
   }
 }
 
-/* 打滑：每 130ms 强制走一格，最多三格；遇到实心字就停下 */
+/* 打滑：每 130ms 强制走一格，最多两格；遇到实心字就停下 */
 function frostSlide(dx, dy) {
   if (state.frostSliding || (!dx && !dy)) return;
   state.frostSliding = true;
   state.animating = true;   // 滑行期间不接受输入
-  let left = 3;
+  let left = 2;
 
   const step = () => {
     if (state.dead || state.ending || left <= 0) {
@@ -1820,6 +1834,7 @@ function pickUp(entity) {
    十一、拆解：屏幕中央拆分，任意数量部件依次飞入背包
    ============================================================ */
 function dismantle(entity) {
+  if (entity.char === '棍') { dismantleStick(entity); return; }   // 棍有专属的“昆爬走”动画
   closeDialog();
   state.animating = true;
   sfx.dismantle();
@@ -1904,6 +1919,72 @@ function dismantle(entity) {
     /* 收尾（自然播完时也走同一个 finish） */
     L(finish, 900 + n * 160 + 900);
   }, 950);
+}
+
+/* 棍的拆解：木落进行囊，“昆”却像虫子一样从手里爬走，消失在右上角。
+   爬行期间主角被定身，任意键可跳过。 */
+function dismantleStick(entity) {
+  closeDialog();
+  state.animating = true;
+  sfx.dismantle();
+
+  const from = entity.el.getBoundingClientRect();
+  removeEntity(entity);
+
+  /* “木”飞入行囊（跳过时会提前补发，不重复） */
+  let woodGiven = false;
+  const giveWood = () => {
+    if (woodGiven) return;
+    woodGiven = true;
+    state.bag.push('木');
+    renderBag();
+    popBagBtn();
+  };
+  const bagR = bagBtn.getBoundingClientRect();
+  flyChar('木',
+    { x: from.left + from.width / 2, y: from.top + from.height / 2 },
+    { x: bagR.left + bagR.width / 2, y: bagR.top + bagR.height / 2 },
+    620, giveWood, 24);
+
+  /* “昆”从主角手边爬出，扭着爬向右上角 */
+  const p = playerEl.getBoundingClientRect();
+  const bug = document.createElement('div');
+  bug.className = 'bug-char';
+  bug.textContent = '昆';
+  document.body.appendChild(bug);
+
+  const sx = p.right - 2, sy = p.top + 8;
+  const ex = innerWidth - 26, ey = 28;
+  const dx = ex - sx, dy = ey - sy;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len, ny = dx / len;
+  const N = 30, frames = [];
+  bug.style.left = sx + 'px';
+  bug.style.top = sy + 'px';
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const wig = Math.sin(t * Math.PI * 9) * 12 * (1 - t * .4);
+    frames.push({
+      left: (sx + dx * t + nx * wig) + 'px',
+      top: (sy + dy * t + ny * wig) + 'px',
+      transform: `translate(-50%, -50%) rotate(${Math.sin(t * Math.PI * 9) * 26}deg) scale(${1 - t * .45})`,
+      opacity: t > .88 ? Math.max(0, (1 - t) / .12) : 1,
+    });
+  }
+  bug.animate(frames, { duration: 2300, easing: 'ease-in-out', fill: 'forwards' });
+
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    state.skipAnim = null;
+    bug.remove();
+    giveWood();
+    state.animating = false;
+    narrate('“昆”像虫子一样从你手里爬走了，消失在右上角。棍断处只留下一根“木”。');
+  };
+  state.skipAnim = finish;   // 定身期间任意键可跳过
+  later(finish, 2600);
 }
 
 /* ============================================================
@@ -2129,6 +2210,43 @@ function meltIce(heldChar, target) {
       }
     }, 480);
   }, 22);
+}
+
+/* 烧红的木贴上霜：霜化成白气，屋子中央的“地”随之落定（恢复碰撞箱） */
+function meltFrost(heldChar, target) {
+  if (!state.flags.litWood) { narrate('一块冷木贴上去，霜纹丝不动。'); return; }
+  if (state.animating) return;
+  state.animating = true;
+  sfx.fire();
+
+  const P = r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  const from = P(playerEl.getBoundingClientRect());
+  const to = P(target.el.getBoundingClientRect());
+
+  setHeld(null);
+  flyChar(heldChar, from, to, 380, () => {
+    target.el.classList.add('flash');
+    later(() => {
+      removeEntity(target);
+      solidifyEarth();
+      flyChar(heldChar, to, P(playerEl.getBoundingClientRect()), 360, () => {
+        setHeld(heldChar);   // 霜太薄，木没有熄灭，仍是红的
+        state.animating = false;
+        narrate('烧红的“木”贴上“霜”，霜“嘶”地化成一缕白气——屋子中央的“地”忽然沉了下来，重新有了实体的重量。');
+      }, 26);
+    }, 420);
+  }, 22);
+}
+
+/* “地”恢复碰撞箱 */
+function solidifyEarth() {
+  const earth = [...state.entities.values()].find(e => e.char === '地');
+  if (!earth || earth.solid) return;
+  earth.solid = true;
+  earth.el.classList.remove('flash');
+  void earth.el.offsetWidth;
+  earth.el.classList.add('flash');
+  later(() => earth.el.classList.remove('flash'), 500);
 }
 
 /* 水：无实体的背景字，踩得过去 */
