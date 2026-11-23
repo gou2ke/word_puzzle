@@ -184,6 +184,21 @@ html, body {
   0%, 100% { text-shadow: 0 0 4px rgba(216,199,138,.25); }
   50%      { text-shadow: 0 0 14px rgba(216,199,138,.75); }
 }
+/* 引导关专属配色：灰白的“一”、纯白的“明”、红棕的“树” */
+.cell-char.tint-gray {
+  color: #cfccc6;
+  animation: none;
+  text-shadow: 0 0 6px rgba(235, 235, 230, .22);
+}
+.cell-char.tint-white {
+  color: #ffffff;
+  animation: none;
+  text-shadow: 0 0 10px rgba(255, 255, 255, .55);
+}
+.cell-char.scene.tint-brown {
+  color: #8f4a30;
+  text-shadow: 0 0 6px rgba(143, 74, 48, .25);
+}
 
 /* 链：拴住你的字，冷白 */
 .cell-char.chain {
@@ -803,11 +818,13 @@ const LEVELS = [
       '墙.我....树....墙',
       '墙..草....火.草.墙',
       '墙.....草.....墙',
-      '墙.一....草....墙',
+      '墙......草....墙',
       '墙..草..明...草.墙',
-      '墙.....草..草..墙',
+      '墙一....草..草..墙',
       '墙墙墙墙墙墙墙墙墙墙墙墙墙',
     ],
+    /* 引导关的专属配色 */
+    skin: { '一': 'tint-gray', '明': 'tint-white', '树': 'tint-brown' },
     steps: STEPS,
   },
   {
@@ -825,6 +842,7 @@ const LEVELS = [
       '墙墙墙墙墙墙墙墙墙墙墙墙墙',
     ],
     intro: '空屋。四壁是“墙”，四壁之外，还是“墙”。屋里什么都没有——除了一把“斧”、一张“桌”、一块“石”，和角落里一块化不开的“冰”。还有墙角那条“链”：它拴着你，你的全部世界，只有这四格。',
+    sound: true,                 // 这一关的左下角有墙里的“声”
     cracked: [{ x: 2, y: 8 }],   // 房间下方那道带裂缝的墙
   },
 ];
@@ -946,6 +964,8 @@ function buildMap() {
       el.className = 'cell-char ' +
         (def.kind === 'scene' ? (def.grass ? 'grass' : 'scene') : (def.chain ? 'chain' : 'entity')) +
         (def.cls ? ' ' + def.cls : '');
+      const skin = state.level.skin && state.level.skin[ch];   // 关卡专属配色
+      if (skin) el.classList.add(skin);
       el.textContent = ch;
       setPos(el, x, y);
       mapEl.appendChild(el);
@@ -1258,7 +1278,7 @@ function movePlayer(nx, ny, underEntity) {
 
   /* 左下角：带着“听”才听得见；空着手，只有一片听不见的动静。
      已经用“听”听见过一次之后，这句话就再也不提了。 */
-  if (nx === 1 && ny === ROWS - 2) {
+  if (state.level.sound && nx === 1 && ny === ROWS - 2) {
     if (state.player.held === '听') amplifyHearing();
     else if (!state.flags.heard) {
       const now = Date.now();
@@ -2384,13 +2404,15 @@ document.addEventListener('keydown', e => {
   if (state.skipAnim) { state.skipAnim(); return; }
   openVision();   // 任意行动：视野自主角散开
 
-  /* 对话框打开：1 拆解 / 2 拾取 / Esc 离开 */
+  /* 对话框打开：1 拆解 / 2 拾取 / Esc 离开；按移动键则收起面板、直接走开 */
   if (state.dialogFor) {
     const ent = state.dialogFor;
-    if (k === '1' && ent.def.dismantle) dismantle(ent);
-    else if (k === '2' && ent.def.pickable) pickUp(ent);
-    else if (k === 'escape') closeDialog();
-    return;
+    const isMove = ['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k);
+    if (k === '1' && ent.def.dismantle) { dismantle(ent); return; }
+    if (k === '2' && ent.def.pickable) { pickUp(ent); return; }
+    if (k === 'escape') { closeDialog(); return; }
+    if (!isMove) return;
+    closeDialog();
   }
 
   if (k === 'f') { toggleBag(); return; }
