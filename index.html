@@ -333,6 +333,36 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
   animation: none;
   text-shadow: 0 0 10px rgba(143, 163, 184, .35);
 }
+/* 神像：金色的，安静地立在房间左侧 */
+.cell-char.god {
+  color: #e8c56a;
+  animation: none;
+  text-shadow: 0 0 18px rgba(232, 197, 106, .55);
+}
+/* 神周围八格的光：鬼一踏进来就会散掉 */
+.god-aura {
+  position: absolute;
+  width: 56px; height: 56px;
+  transform: translate(var(--tx, 0), var(--ty, 0));
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(circle at 50% 50%,
+    rgba(255, 224, 130, .30) 0,
+    rgba(255, 210, 90, .14) 52%,
+    rgba(255, 200, 70, 0) 76%);
+  box-shadow: inset 0 0 20px rgba(255, 220, 120, .18);
+  animation: godAuraPulse 1.6s ease-in-out infinite;
+}
+@keyframes godAuraPulse {
+  0%, 100% { opacity: .45; }
+  50%      { opacity: 1; }
+}
+/* 鬼：纯黑，融在黑暗里，却实实在在挡路 */
+.cell-char.ghost {
+  color: #000;
+  animation: none;
+  text-shadow: none;
+}
 
 /* “死”去的字（灭）：失去碰撞、失去光泽。放在 .fire 之后，保证盖过火焰样式 */
 .cell-char.dead { color: #5a5a5a; opacity: .55; animation: none; }
@@ -667,6 +697,12 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
   text-shadow: 0 0 44px rgba(255, 70, 30, .9);
   animation: fireGlow 1.2s ease-in-out infinite;
 }
+/* 被“鬼”抓住：同一张死亡幕，字换成冷灰的“鬼” */
+.death-fire.ghost-death {
+  color: #d9d9e6;
+  text-shadow: 0 0 44px rgba(190, 190, 220, .8);
+  animation: none;
+}
 .death-text {
   font-size: 17px;
   letter-spacing: 4px;
@@ -945,9 +981,9 @@ body.mirror-world #mirror-tip { color: #7d7768; }
 </div>
 
 <div id="death-overlay">
-  <div class="death-fire">火</div>
-  <div class="death-text">整间屋子，烧了起来。</div>
-  <div class="death-hint">我，没了。　按 R 重来</div>
+  <div class="death-fire" id="death-glyph">火</div>
+  <div class="death-text" id="death-text">整间屋子，烧了起来。</div>
+  <div class="death-hint" id="death-hint">我，没了。　按 R 重来</div>
 </div>
 
 <div id="mirror-overlay">
@@ -1075,6 +1111,10 @@ const CHARS = {
   '霜': { kind: 'scene', solid: false, cls: 'frost',
          sub: '薄薄一层霜，踩上去会打滑',
          combine: { '木': { action: 'meltFrost' } } },
+  '神': { kind: 'entity', solid: true, cls: 'god', sub: '一座金色的神像，低眉不语',
+         pickable: false, pickableWhy: '神像，搬不动',
+         dismantle: null, dismantleWhy: '神像，拆不开' },
+  '鬼': { kind: 'scene', solid: true, cls: 'ghost' },
 
   '门': { kind: 'entity', solid: true, cls: 'door', portal: true, sub: '门后是另一间屋子',
          pickable: false, pickableWhy: '门不是拿来拿的',
@@ -1181,8 +1221,8 @@ const LEVELS = [
     title: '镜 室',
     map: [
       '墙墙墙墙墙墙墙墙墙墙墙墙墙',
-      '墙冰棍..镜......墙',
-      '墙...........墙',
+      '墙冰棍..镜.....鬼墙',
+      '墙.神.........墙',
       '墙..我..霜.....墙',
       '墙.日..霜地霜....门',
       '墙.....霜.....墙',
@@ -1236,6 +1276,8 @@ const state = {
   mirrorWorld: false,      // 已与镜中的“我”换位：房间倒转、背景化白
   mirrorHidden: [],        // 镜中世界里不存在的纯白字（暂存，退出时还原）
   frostSliding: false,     // “霜”触发的打滑位移正在进行
+  ghostTimer: null,        // 镜中世界“鬼”追击的计时器
+  auraCells: [],           // “神”周围八格：鬼踏进去就散
 };
 
 /* DOM 引用 */
@@ -1493,9 +1535,11 @@ function loadLevel(i) {
   state.mirrorWorld = false;
   state.mirrorHidden = [];
   state.frostSliding = false;
+  state.ghostTimer = null;
+  state.auraCells = [];
   document.body.classList.remove('mirror-world');
 
-  mapEl.querySelectorAll('.cell-char, .range-tile').forEach(el => el.remove());
+  mapEl.querySelectorAll('.cell-char, .range-tile, .god-aura').forEach(el => el.remove());
   renderLevelSelect();
 
   buildMap();
@@ -1656,6 +1700,11 @@ function tryMove(dx, dy) {
         return;
       }
       openDialog(target);
+      return;
+    }
+
+    if (target.char === '鬼') {
+      narrate('你撞上了一个看不见的东西。');
       return;
     }
 
@@ -2823,9 +2872,34 @@ function dieByFire() {
   toggleBag(false);
   closeMirror();
   $('overlay').classList.remove('show');
+  const glyph = $('death-glyph');
+  glyph.textContent = '火';
+  glyph.classList.remove('ghost-death');
+  $('death-text').textContent = '整间屋子，烧了起来。';
+  $('death-hint').textContent = '我，没了。　按 R 重来';
   $('death-overlay').classList.add('show');
   narrate('火吞掉了最后一格。我，也烧没了。');
   sfx.fire();
+}
+
+/* 在镜中世界被“鬼”追上 */
+function dieByGhost() {
+  if (state.dead) return;
+  state.dead = true;
+  state.animating = true;
+  stopGhostHunt();
+  closeDialog();
+  toggleBag(false);
+  closeMirror();
+  $('overlay').classList.remove('show');
+  const glyph = $('death-glyph');
+  glyph.textContent = '鬼';
+  glyph.classList.add('ghost-death');
+  $('death-text').textContent = '它贴上了你的背。';
+  $('death-hint').textContent = '我，被“鬼”吞掉了。　按 R 重来';
+  $('death-overlay').classList.add('show');
+  narrate('“鬼”贴了上来，怎么也甩不掉。');
+  sfx.bump();
 }
 
 /* ============================================================
@@ -3172,7 +3246,11 @@ function flyOpenFromMirror(mirrorRect) {
   const pos = state.flags.doorBlankPos;
   const blankEl = state.flags.doorBlank ? mapEl.querySelector('.say-blank-door') : null;
   if (!pos || !blankEl) {
-    narrate('“开”从镜里飘出来，在半空打了个旋，散了。');
+    /* 句子还没出现：先把“开”收进行囊，等句子出现时再自动检索 */
+    state.bag.push('开');
+    renderBag();
+    popBagBtn();
+    narrate('“开”从镜里落进了行囊。');
     return;
   }
   state.animating = true;
@@ -3211,20 +3289,45 @@ function fillDoorBlankByMirror() {
 /* 镜中翻出“开”之后的定身对话 */
 function startOpenRevealCutscene() {
   state.animating = true;
-  narrate('……');
+  narrate('....你还记得我一开始对你说过什么吗');
   later(() => {
-    narrate('你是“我”....');
+    clearDoorSentence();   // 房间里的填空句随之消失
+    narrate('……');
     later(() => {
-      narrate('我也是你，我们生而为一。');
+      narrate('你是“我”....');
       later(() => {
-        narrate('“你”想知道答案的话...');
+        narrate('我也是你，我们生而为一。');
         later(() => {
-          narrate('....就来镜中看看“我”吧');
-          state.animating = false;
-        }, 2000);
+          narrate('“你”想知道答案的话...');
+          later(() => {
+            narrate('....就来镜中看看“我”吧');
+            state.animating = false;
+          }, 2000);
+        }, 3000);
       }, 3000);
-    }, 3000);
-  }, 2000);
+    }, 2000);
+  }, 3000);
+}
+
+/* 房间下方那句填字句散掉 */
+function clearDoorSentence() {
+  [...state.entities.values()]
+    .filter(e => e.def && e.def.say)
+    .forEach(removeEntity);
+  mapEl.querySelectorAll('.say-blank-door').forEach(el => el.remove());
+  sfx.open();
+}
+
+/* 句子出现时检查一次行囊：若早有“开”，直接补进空位并继续定身对话 */
+function maybeAutoFillDoorFromBag() {
+  if (!state.flags.doorBlank) return false;
+  const idx = state.bag.indexOf('开');
+  if (idx < 0) return false;
+  state.bag.splice(idx, 1);
+  renderBag();
+  fillDoorBlankByMirror();
+  startOpenRevealCutscene();
+  return true;
 }
 
 /* 彩蛋：镜子里也有一个“我”。放进镜中，两个“我”换位；
@@ -3314,6 +3417,171 @@ function swapWorldObjects() {
   setMirrorHot(!!state.flags.mirrorHot);   // 所有镜面同步冷热外观
 }
 
+/* ============================================================
+   十二·七、镜中的“鬼”：进入镜中世界后的追击
+   ============================================================ */
+function findGhost() {
+  return [...state.entities.values()].find(e => e.char === '鬼');
+}
+
+/* “神”周围八格 */
+function godAuraCells() {
+  const god = [...state.entities.values()].find(e => e.char === '神');
+  if (!god) return [];
+  const cells = [];
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const x = god.x + dx, y = god.y + dy;
+      if (x < 0 || y < 0 || x >= COLS || y >= ROWS) continue;
+      cells.push({ x, y });
+    }
+  }
+  return cells;
+}
+
+function isInGodAura(x, y) {
+  return state.auraCells.some(c => c.x === x && c.y === y);
+}
+
+/* 黄色的光亮：铺在字的下层 */
+function showGodAura() {
+  hideGodAura();
+  state.auraCells = godAuraCells();
+  for (const c of state.auraCells) {
+    const el = document.createElement('div');
+    el.className = 'god-aura';
+    setPos(el, c.x, c.y);
+    mapEl.appendChild(el);
+  }
+}
+
+function hideGodAura() {
+  mapEl.querySelectorAll('.god-aura').forEach(el => el.remove());
+  state.auraCells = [];
+}
+
+/* 第一次踏进镜中世界：定身听完“欢迎...”，三秒后鬼开始追 */
+function startGhostWelcome() {
+  if (state.flags.ghostWelcomed) {
+    if (findGhost()) beginGhostHunt();
+    else showGodAura();       // 鬼已经散了，神的光还亮着
+    return;
+  }
+  if (!findGhost()) return;
+  state.flags.ghostWelcomed = true;
+  state.animating = true;
+  narrate('欢迎...');
+  later(() => {
+    state.animating = false;
+    beginGhostHunt();
+  }, 3000);
+}
+
+function beginGhostHunt() {
+  if (!state.mirrorWorld || state.dead || state.ending) return;
+  if (!findGhost()) return;
+  state.flags.ghostHunt = true;
+  showGodAura();
+  scheduleGhostTick();
+}
+
+function scheduleGhostTick() {
+  if (!state.flags.ghostHunt || state.dead || state.ending) return;
+  if (state.ghostTimer) {
+    clearTimeout(state.ghostTimer);
+    timers.delete(state.ghostTimer);
+  }
+  state.ghostTimer = later(ghostTick, 700);
+}
+
+/* 离开镜中世界：追击暂停、光收回；再进来时接着追 */
+function stopGhostHunt() {
+  state.flags.ghostHunt = false;
+  if (state.ghostTimer) {
+    clearTimeout(state.ghostTimer);
+    timers.delete(state.ghostTimer);
+    state.ghostTimer = null;
+  }
+}
+
+function ghostTick() {
+  state.ghostTimer = null;
+  if (!state.flags.ghostHunt || state.dead || state.ending) return;
+  if (!state.mirrorWorld) { stopGhostHunt(); hideGodAura(); return; }
+
+  const ghost = findGhost();
+  if (!ghost) { stopGhostHunt(); return; }
+  if (state.mirrorOpen) { scheduleGhostTick(); return; }   // 镜面界面开着时暂停
+
+  if (isInGodAura(ghost.x, ghost.y)) { killGhost(ghost); return; }
+
+  const next = ghostNextStep(ghost);
+  if (next) {
+    moveGhost(ghost, next.x, next.y);
+    /* 先判光：哪怕主角正站在光里，鬼一踏进来也是先散掉 */
+    if (isInGodAura(next.x, next.y)) { killGhost(ghost); return; }
+    if (next.x === state.player.x && next.y === state.player.y) { dieByGhost(); return; }
+  }
+  scheduleGhostTick();
+}
+
+/* 从主角出发做一次 BFS，鬼沿着距离递减的格子走一步 */
+function ghostNextStep(ghost) {
+  const passable = (x, y) => {
+    if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return false;
+    const e = entityAt(x, y);
+    return !e || e === ghost;   // 有字的格子不进，避免叠字
+  };
+
+  const dist = new Map();
+  dist.set(key(state.player.x, state.player.y), 0);
+  const q = [{ x: state.player.x, y: state.player.y }];
+  for (let head = 0; head < q.length; head++) {
+    const cur = q[head];
+    const d = dist.get(key(cur.x, cur.y));
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cur.x + dx, ny = cur.y + dy, k = key(nx, ny);
+      if (dist.has(k) || !passable(nx, ny)) continue;
+      dist.set(k, d + 1);
+      q.push({ x: nx, y: ny });
+    }
+  }
+
+  let best = null, bestD = Infinity;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nx = ghost.x + dx, ny = ghost.y + dy;
+    if (!passable(nx, ny)) continue;
+    const d = dist.get(key(nx, ny));
+    if (d === undefined || d >= bestD) continue;
+    bestD = d;
+    best = { x: nx, y: ny };
+  }
+  return best;
+}
+
+function moveGhost(ghost, nx, ny) {
+  state.entities.delete(key(ghost.x, ghost.y));
+  ghost.x = nx;
+  ghost.y = ny;
+  state.entities.set(key(nx, ny), ghost);
+  ghost.el.style.transition = 'transform .5s cubic-bezier(.3,.7,.35,1)';
+  setPos(ghost.el, nx, ny);
+  tone(70, .14, 'sine', .018);
+}
+
+/* 鬼踏进“神”的光里：立刻散掉 */
+function killGhost(ghost) {
+  stopGhostHunt();
+  sfx.combine();
+  ghost.el.classList.add('flash');
+  later(() => {
+    if (state.entities.get(key(ghost.x, ghost.y)) !== ghost) return;   // 已切关
+    removeEntity(ghost);
+    narrate('“鬼”撞进了“神”的光里，像一滴墨落进清水，散得干干净净。');
+  }, 260);
+}
+
 /* 换位之后：整间屋子瞬间绕屏幕中心倒转 180°，背景变成白色 */
 function enterMirrorWorld() {
   if (state.mirrorWorld) return;
@@ -3324,11 +3592,14 @@ function enterMirrorWorld() {
   setBlackOne(true);     // 白底显形，那道纯黑的“一”可以拾取了
   fit();   // 舞台 transform 里带上 180° 旋转，无过渡，瞬间完成
   sfx.combine();
+  startGhostWelcome();   // 镜中世界：先听完“欢迎...”，三秒后鬼开始追
 }
 
 /* 换回之后：屋子转回正立，背景恢复深色，一切回到换位之前 */
 function exitMirrorWorld() {
   if (!state.mirrorWorld) return;
+  stopGhostHunt();
+  hideGodAura();
   state.mirrorWorld = false;
   document.body.classList.remove('mirror-world');
   swapWorldObjects();    // 镜→墙、墙→镜、窗→门，全部换回对象
@@ -3353,7 +3624,10 @@ function startDoorCutscene() {
         $('narrative').classList.remove('deep-red');   // 这句话之后恢复标准字色
         flashRed();
         spawnDoorSentence();
-        state.animating = false;
+        /* 句子出现的瞬间，若行囊里早有“开”，直接补上并继续定身对话 */
+        later(() => {
+          if (!maybeAutoFillDoorFromBag()) state.animating = false;
+        }, 400);
       }, 3500);
     }, 2000);
   }, 5000);
