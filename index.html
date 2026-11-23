@@ -3146,17 +3146,85 @@ function convertInMirror(char) {
       }
       setMirrorHot(true);
       narrate('“水”在镜中越转越急，“腾”地烧了起来——“火”从镜面里跌出来，落在镜前。镜面被烤得发烫。');
+    } else if (to === '开') {
+      /* “开”不进行囊：收镜后直接飞向门口那句话的空位 */
+      const mirrorRect = state.mirrorEl ? state.mirrorEl.el.getBoundingClientRect() : null;
+      renderBag();
+      later(() => {
+        if (state.mirrorOpen) closeMirror();
+        flyOpenFromMirror(mirrorRect);
+      }, 560);
+      return;
     } else {
       state.bag.push(to);
-      narrate(to === '开'
-        ? '“关”在镜里打了个转，翻成了“开”。镜面上，门的方向亮了一下。'
-        : '“' + char + '”在镜中翻了个面，成了“' + to + '”。');
+      narrate('“' + char + '”在镜中翻了个面，成了“' + to + '”。');
     }
     renderBag();
     popBagBtn();
     /* 保持忙碌锁住输入，让新字在镜中亮一下再收镜 */
     later(() => { if (state.mirrorOpen) closeMirror(); }, 560);
   });
+}
+
+/* 镜中翻出的“开”不进行囊，而是飞出镜面，落进门口那句话的空位 */
+function flyOpenFromMirror(mirrorRect) {
+  if (state.dead || state.ending) return;
+  const pos = state.flags.doorBlankPos;
+  const blankEl = state.flags.doorBlank ? mapEl.querySelector('.say-blank-door') : null;
+  if (!pos || !blankEl) {
+    narrate('“开”从镜里飘出来，在半空打了个旋，散了。');
+    return;
+  }
+  state.animating = true;
+  sfx.combine();
+  const b = blankEl.getBoundingClientRect();
+  const to = { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+  const from = mirrorRect
+    ? { x: mirrorRect.left + mirrorRect.width / 2, y: mirrorRect.top + mirrorRect.height / 2 }
+    : { x: innerWidth / 2, y: innerHeight / 2 };
+  flyChar('开', from, to, 700, () => {
+    if (state.dead || state.ending) { state.animating = false; return; }
+    fillDoorBlankByMirror();
+    startOpenRevealCutscene();
+  }, 26);
+}
+
+/* 把“开”直接嵌进空位，不经过行囊 */
+function fillDoorBlankByMirror() {
+  const pos = state.flags.doorBlankPos;
+  if (!state.flags.doorBlank || !pos) return;
+  state.flags.doorBlank = false;
+  state.flags.doorSolved = true;
+  mapEl.querySelectorAll('.say-blank-door').forEach(el => el.remove());
+  const old = entityAt(pos.x, pos.y);
+  if (old) removeEntity(old);
+  const ent = spawnCharEntity('开', pos.x, pos.y);
+  ent.saySlot = 'door';
+  ent.def = { kind: 'entity', solid: true, say: true, sub: '这句话已经说出口了',
+              pickable: false, pickableWhy: '这句话已经说出口了',
+              dismantle: null, dismantleWhy: '拆不开' };
+  ent.el.className = 'cell-char entity say-filled';
+  popIn(ent, pos.x, pos.y);
+  sfx.combine();
+}
+
+/* 镜中翻出“开”之后的定身对话 */
+function startOpenRevealCutscene() {
+  state.animating = true;
+  narrate('……');
+  later(() => {
+    narrate('你是“我”....');
+    later(() => {
+      narrate('我也是你，我们生而为一。');
+      later(() => {
+        narrate('“你”想知道答案的话...');
+        later(() => {
+          narrate('....就来镜中看看“我”吧');
+          state.animating = false;
+        }, 2000);
+      }, 3000);
+    }, 3000);
+  }, 2000);
 }
 
 /* 彩蛋：镜子里也有一个“我”。放进镜中，两个“我”换位；
@@ -3280,7 +3348,7 @@ function startDoorCutscene() {
   later(() => {
     narrate('……');
     later(() => {
-      narrate('没关系，我先....');
+      narrate('没关系....');
       later(() => {
         $('narrative').classList.remove('deep-red');   // 这句话之后恢复标准字色
         flashRed();
