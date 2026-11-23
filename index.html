@@ -662,19 +662,38 @@ html, body {
 }
 @keyframes mirrorSheen { 0%, 100% { left: -45%; } 50% { left: 110%; } }
 #mirror-core {
+  position: relative;
+  z-index: 2;
   font-size: 116px;
   color: #dfeaf5;
   text-shadow: 0 0 34px rgba(175, 205, 238, .55);
-  transition: color .25s;
+  transition: color .25s, opacity .2s;
 }
-#mirror-core.spinning { animation: mirrorSpin 1.25s cubic-bezier(.3, .1, .35, 1); }
-@keyframes mirrorSpin {
-  0%   { transform: rotate(0) skew(0) scale(1); filter: blur(0); }
-  28%  { transform: rotate(20deg) skew(9deg) scale(1.14); filter: blur(3px); }
-  56%  { transform: rotate(-16deg) skew(-7deg) scale(1.04); filter: blur(6px); }
-  82%  { transform: rotate(7deg) skew(3deg) scale(1.3); filter: blur(9px); }
-  100% { transform: rotate(0) scale(1); filter: blur(0); }
+/* 螺旋漩涡：粒子画布盖在镜面上，背后再叠一层缓慢旋转的锥形光带 */
+#mirror-vortex {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
 }
+#mirror-frame::before {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  background: conic-gradient(from 0deg,
+    transparent 0deg,
+    rgba(150, 195, 235, .13) 50deg,
+    transparent 110deg,
+    transparent 200deg,
+    rgba(180, 215, 245, .09) 250deg,
+    transparent 320deg);
+  opacity: 0;
+  transition: opacity .35s;
+  animation: vortexSpin 2.4s linear infinite;
+  pointer-events: none;
+}
+#mirror-frame.morphing::before { opacity: 1; }
+@keyframes vortexSpin { to { transform: rotate(360deg); } }
 #mirror-core.flashing { animation: mirrorFlash .62s ease-out; color: #fff; }
 @keyframes mirrorFlash {
   0%   { text-shadow: 0 0 12px rgba(255, 255, 255, .45); transform: scale(1); }
@@ -1070,6 +1089,7 @@ const state = {
   mirrorOpen: false,       // 镜的全屏界面是否打开
   mirrorBusy: false,       // 镜中的字正在翻转
   mirrorEl: null,          // 当前这面镜子的实体
+  mirrorWarpRaf: 0,        // 螺旋变形的动画帧句柄
   ending: false,           // 已走到终章
 };
 
@@ -1305,6 +1325,7 @@ function loadLevel(i) {
   state.mirrorOpen = false;
   state.mirrorBusy = false;
   state.mirrorEl = null;
+  cancelMirrorMorph();
   state.ending = false;
 
   mapEl.querySelectorAll('.cell-char, .range-tile').forEach(el => el.remove());
@@ -2454,6 +2475,150 @@ function setMirrorHot(hot) {
   if (m) m.el.classList.toggle('mirror-hot', hot);
 }
 
+/* ---------- 镜中变形：把字打散成粒子，螺旋卷入镜心，再螺旋散出、聚成另一个字 ---------- */
+
+/* 把字渲染到离屏画布，按像素透明度采样成粒子（坐标相对字心） */
+function glyphParticles(char, fontSize) {
+  const S = Math.ceil(fontSize * 1.9);
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return { pts: [], maxR: fontSize * .5 };
+
+  ctx.font = `${fontSize}px "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff';
+  ctx.fillText(char, S / 2, S / 2 + fontSize * .02);
+
+  const data = ctx.getImageData(0, 0, S, S).data;
+  const step = 4;            // 采样步长：控制粒子数量
+  const pts = [];
+  let maxR = 1;
+  for (let y = 0; y < S; y += step) {
+    for (let x = 0; x < S; x += step) {
+      if (data[(y * S + x) * 4 + 3] < 140) continue;   // 只要笔画实心处
+      const px = x - S / 2, py = y - S / 2;
+      const r = Math.hypot(px, py);
+      if (r > maxR) maxR = r;
+      pts.push({ r, a: Math.atan2(py, px) });
+    }
+  }
+  return { pts, maxR };
+}
+
+/* 取消正在播放的镜中变形，并清理画布 */
+function cancelMirrorMorph() {
+  if (state.mirrorWarpRaf) { cancelAnimationFrame(state.mirrorWarpRaf); state.mirrorWarpRaf = 0; }
+  const cv = $('mirror-vortex');
+  if (cv) cv.remove();
+  const frame = $('mirror-frame');
+  if (frame) frame.classList.remove('morphing');
+  const core = $('mirror-core');
+  if (core) core.style.opacity = '';
+}
+
+/* 入场：原字被卷进镜心 → 镜心闪光 → 出场：新字从镜心螺旋散开聚形。
+   onDone 在整段动画结束时触发（此时核心已换成新字并带发光）。 */
+function playMirrorMorph(fromChar, toChar, onDone) {
+  cancelMirrorMorph();
+  const frame = $('mirror-frame'), core = $('mirror-core');
+  if (!frame || !core) { onDone && onDone(); return; }
+
+  const fw = frame.clientWidth, fh = frame.clientHeight;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const cv = document.createElement('canvas');
+  cv.id = 'mirror-vortex';
+  cv.width = Math.round(fw * dpr);
+  cv.height = Math.round(fh * dpr);
+  cv.style.width = fw + 'px';
+  cv.style.height = fh + 'px';
+  frame.appendChild(cv);
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  frame.classList.add('morphing');
+  core.style.opacity = '0';   // 期间由粒子替代核心字
+
+  const A = glyphParticles(fromChar, 116);
+  const B = glyphParticles(toChar, 116);
+  const cx = fw / 2, cy = fh / 2;
+  const IN = 720, HOLD = 220, OUT = 720, TOTAL = IN + HOLD + OUT;
+  const SPIN = -Math.PI * 2.15;                 // 逆时针卷过两圈多
+  const easeIn = t => t * t * (2.2 - 1.2 * t);  // 越卷越快
+  const easeOut = t => 1 - Math.pow(1 - t, 3);  // 越散越缓
+  const t0 = performance.now();
+  let switched = false;
+
+  const dot = (x, y, s, alpha) => {
+    ctx.fillStyle = `rgba(223, 234, 245, ${alpha.toFixed(3)})`;
+    ctx.fillRect(x - s / 2, y - s / 2, s, s);
+  };
+
+  function drawIn(t) {
+    const e = easeIn(t);
+    const fade = 1 - Math.pow(t, 4);   // 临近镜心时整体淡出
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of A.pts) {
+      const k = p.r / A.maxR;
+      const theta = p.a + SPIN * e * (0.72 + 0.55 * (1 - k));   // 内外圈转速差，形成螺旋剪切
+      const x = cx + Math.cos(theta) * p.r * (1 - e);
+      const y = cy + Math.sin(theta) * p.r * (1 - e);
+      dot(x, y, 3 * (1 - .55 * e), fade * (0.45 + 0.55 * (1 - k)));
+    }
+    ctx.restore();
+  }
+
+  function drawFlash(t) {
+    const r = 6 + easeOut(t) * Math.min(fw, fh) * .55;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, `rgba(255, 255, 255, ${(0.95 * (1 - t)).toFixed(3)})`);
+    g.addColorStop(.45, `rgba(198, 226, 255, ${(0.45 * (1 - t)).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(160, 200, 255, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, fw, fh);
+  }
+
+  function drawOut(t) {
+    if (!switched) { switched = true; core.textContent = toChar; }
+    const e = easeOut(t);
+    /* 末段让真实的新字淡入，粒子同时淡出，避免交接处跳变 */
+    core.style.opacity = String(Math.max(0, (t - .62) / .38).toFixed(3));
+    const fade = Math.min(1, (1 - t) / .35);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of B.pts) {
+      const theta = p.a + SPIN * (1 - e) * 0.5;
+      const x = cx + Math.cos(theta) * p.r * e;
+      const y = cy + Math.sin(theta) * p.r * e;
+      dot(x, y, 1.4 + 1.6 * e, fade);
+    }
+    ctx.restore();
+  }
+
+  const step = now => {
+    const el = now - t0;
+    ctx.clearRect(0, 0, fw, fh);
+    if (el < IN) {
+      drawIn(el / IN);
+    } else if (el < IN + HOLD) {
+      drawFlash((el - IN) / HOLD);
+    } else if (el < TOTAL) {
+      drawOut((el - IN - HOLD) / OUT);
+    } else {
+      cancelMirrorMorph();
+      core.textContent = toChar;
+      core.style.opacity = '';
+      core.className = 'flashing';
+      onDone && onDone();
+      return;
+    }
+    state.mirrorWarpRaf = requestAnimationFrame(step);
+  };
+  state.mirrorWarpRaf = requestAnimationFrame(step);
+}
+
 /* 镜前的空地：优先正下方，再向左右铺开，避开主角站着的格子 */
 function mirrorFrontCell(mirror) {
   const y = mirror.y + 1;
@@ -2509,6 +2674,7 @@ function openMirror(mirror) {
   const core = $('mirror-core');
   core.textContent = '镜';
   core.className = '';
+  core.style.opacity = '';
   $('mirror-overlay').classList.add('show');
   toggleBag(false);
   renderMirrorBag();
@@ -2516,9 +2682,12 @@ function openMirror(mirror) {
 }
 
 function closeMirror() {
+  cancelMirrorMorph();
   state.mirrorOpen = false;
   state.mirrorBusy = false;
   state.mirrorEl = null;
+  const core = $('mirror-core');
+  if (core) { core.className = ''; core.style.opacity = ''; }
   $('mirror-overlay').classList.remove('show');
 }
 
@@ -2547,7 +2716,7 @@ function renderMirrorBag() {
   row.appendChild(me);
 }
 
-/* 放字入镜：有另一面的，旋转扭曲后翻成新字；没有的，晃一圈退回行囊 */
+/* 放字入镜：有另一面的，螺旋变形后翻成新字；没有的，晃一圈退回行囊 */
 function convertInMirror(char) {
   const to = MIRROR_PAIRS[char];
   const core = $('mirror-core');
@@ -2566,37 +2735,30 @@ function convertInMirror(char) {
   if (state.player.held === char) setHeld(null);   // 手里的字也跟着进了镜子
   renderMirrorBag();
   core.textContent = char;
-  core.className = 'spinning';
   sfx.combine();
 
-  later(() => {
-    if (state.dead || state.ending) return;
-    core.className = 'flashing';
-    core.textContent = to;
-    later(() => {
-      if (state.dead || state.ending) return;
-      core.className = '';
-      if (to === '火') {
-        /* “火”拿不住：直接从镜面里跌到镜前，开始 20 秒倒计时 */
-        const cell = state.mirrorEl ? mirrorFrontCell(state.mirrorEl) : null;
-        if (cell) {
-          const fire = spawnFire(cell.x, cell.y, '火');
-          fire.fromMirror = true;
-        }
-        setMirrorHot(true);
-        narrate('“水”在镜中越转越急，“腾”地烧了起来——“火”从镜面里跌出来，落在镜前。镜面被烤得发烫。');
-      } else {
-        state.bag.push(to);
-        narrate(to === '开'
-          ? '“关”在镜里打了个转，翻成了“开”。镜面上，门的方向亮了一下。'
-          : '“' + char + '”在镜中翻了个面，成了“' + to + '”。');
+  playMirrorMorph(char, to, () => {
+    if (state.dead || state.ending) { closeMirror(); return; }
+    if (to === '火') {
+      /* “火”拿不住：直接从镜面里跌到镜前，开始 20 秒倒计时 */
+      const cell = state.mirrorEl ? mirrorFrontCell(state.mirrorEl) : null;
+      if (cell) {
+        const fire = spawnFire(cell.x, cell.y, '火');
+        fire.fromMirror = true;
       }
-      renderBag();
-      popBagBtn();
-      state.mirrorBusy = false;
-      closeMirror();
-    }, 620);
-  }, 1300);
+      setMirrorHot(true);
+      narrate('“水”在镜中越转越急，“腾”地烧了起来——“火”从镜面里跌出来，落在镜前。镜面被烤得发烫。');
+    } else {
+      state.bag.push(to);
+      narrate(to === '开'
+        ? '“关”在镜里打了个转，翻成了“开”。镜面上，门的方向亮了一下。'
+        : '“' + char + '”在镜中翻了个面，成了“' + to + '”。');
+    }
+    renderBag();
+    popBagBtn();
+    /* 保持忙碌锁住输入，让新字在镜中亮一下再收镜 */
+    later(() => { if (state.mirrorOpen) closeMirror(); }, 560);
+  });
 }
 
 /* 彩蛋：镜子里也有一个“我”。把它拖进来，两个“我”换了位置 */
@@ -2604,24 +2766,18 @@ function mirrorSwapSelf() {
   state.mirrorBusy = true;
   const core = $('mirror-core');
   core.textContent = '我';
-  core.className = 'spinning';
   sfx.combine();
-  later(() => {
-    if (state.dead || state.ending) return;
-    core.className = 'flashing';
-    core.textContent = '你';
-    later(() => {
-      if (state.dead || state.ending) return;
-      state.flags.mirrorSwapped = true;
-      playerEl.innerHTML = '你<span id="held-char"></span>';
-      const hc = $('held-char');
-      hc.textContent = state.player.held || '';
-      applyWoodColor(hc, state.player.held);
-      state.mirrorBusy = false;
-      closeMirror();
-      narrate('镜子里的人朝你笑了笑。你们换了位置。');
-    }, 620);
-  }, 1300);
+
+  playMirrorMorph('我', '你', () => {
+    if (state.dead || state.ending) { closeMirror(); return; }
+    state.flags.mirrorSwapped = true;
+    playerEl.innerHTML = '你<span id="held-char"></span>';
+    const hc = $('held-char');
+    hc.textContent = state.player.held || '';
+    applyWoodColor(hc, state.player.held);
+    narrate('镜子里的人朝你笑了笑。你们换了位置。');
+    later(() => { if (state.mirrorOpen) closeMirror(); }, 560);
+  });
 }
 
 /* 门：拿着“开”撞上去，门后就是终章 */
