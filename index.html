@@ -1665,7 +1665,9 @@ function tryMove(dx, dy) {
       if (state.level.doorLock) {
         if (state.player.held === '开') openDoorAndEnd();
         else if (state.flags.doorCutscene) narrate('门依然关着。');
-        else {
+        else if (!(state.flags.frostMelted && state.flags.fireOut && state.flags.bugSeen)) {
+          narrate('现在还不是时候...');
+        } else {
           state.flags.doorHits = (state.flags.doorHits || 0) + 1;
           if (state.flags.doorHits === 1) narrate('门撞不开。');
           else if (state.flags.doorHits === 2) narrate('……');
@@ -2044,6 +2046,7 @@ function dismantleStick(entity) {
     state.skipAnim = null;
     bug.remove();
     giveWood();
+    state.flags.bugSeen = true;   // 撞门三连的前提之一：见过“昆”爬走
     state.animating = false;
     narrate('“昆”像虫子一样从你手里爬走了，一头钻进右上角的墙里，不见了。棍断处只留下一根“木”。');
   };
@@ -2058,6 +2061,8 @@ function dismantleStick(entity) {
 function combineChars(heldChar, target, resultChar) {
   state.animating = true;
   sfx.combine();
+  /* “火”被“一”压灭：记下“已经灭过火”，作为撞门三连的前提之一 */
+  if (target.char === '火' && resultChar === '灭') state.flags.fireOut = true;
 
   const from = playerEl.getBoundingClientRect();
   const to = target.el.getBoundingClientRect();
@@ -2292,6 +2297,7 @@ function meltFrost(heldChar, target) {
     target.el.classList.add('flash');
     later(() => {
       removeEntity(target);
+      state.flags.frostMelted = true;   // 撞门三连的前提之一：霜被红木融化过
       solidifyEarth();
       flyChar(heldChar, to, P(playerEl.getBoundingClientRect()), 360, () => {
         setHeld(heldChar);   // 霜太薄，木没有熄灭，仍是红的
@@ -3277,6 +3283,7 @@ function startDoorCutscene() {
     later(() => {
       narrate('没关系，我先....');
       later(() => {
+        $('narrative').classList.remove('deep-red');   // 这句话之后恢复标准字色
         flashRed();
         spawnDoorSentence();
         state.animating = false;
