@@ -248,6 +248,18 @@ body.mirror-world #player .glyph {
   text-shadow: 0 0 14px rgba(126, 182, 214, .35);
 }
 
+/* 霜：没有碰撞，踩上去会打滑 */
+.cell-char.frost {
+  color: #8fb4c9;
+  font-size: 22px;
+  text-shadow: 0 0 10px rgba(150, 190, 215, .45);
+  animation: frostGlow 2.8s ease-in-out infinite;
+}
+@keyframes frostGlow {
+  0%, 100% { opacity: .55; }
+  50%      { opacity: .95; }
+}
+
 /* “木”的三种成色：没烧过是棕色，烧着了是红色，被冰浇灭后发灰 */
 .cell-char.wood-color-wood, .bag-slot.wood-color-wood, .mirror-slot.wood-color-wood, #held-char.wood-color-wood {
   color: #b08153;
@@ -766,6 +778,57 @@ body.mirror-world #player .glyph {
   white-space: nowrap;
 }
 
+/* ---------- 镜中世界：镜面界面也换成白纸色 ---------- */
+body.mirror-world #mirror-overlay {
+  background: radial-gradient(circle at 50% 42%, rgba(252, 250, 244, .98), rgba(240, 236, 226, .99) 72%);
+}
+body.mirror-world #mirror-frame {
+  border-color: #c3bdac;
+  background: linear-gradient(158deg, rgba(255, 255, 255, .92), rgba(242, 238, 228, .86) 46%, rgba(255, 255, 255, .9));
+  box-shadow: 0 0 60px rgba(120, 110, 88, .10) inset, 0 0 44px rgba(90, 82, 62, .16), 0 0 26px rgba(150, 140, 110, .12);
+}
+body.mirror-world #mirror-frame::after {
+  background: linear-gradient(90deg, transparent, rgba(90, 80, 55, .10), transparent);
+}
+body.mirror-world #mirror-frame::before {
+  background: conic-gradient(from 0deg,
+    transparent 0deg,
+    rgba(168, 142, 70, .13) 50deg,
+    transparent 110deg,
+    transparent 200deg,
+    rgba(120, 110, 80, .09) 250deg,
+    transparent 320deg);
+}
+body.mirror-world #mirror-core {
+  color: #2b2b33;
+  text-shadow: 0 0 30px rgba(80, 76, 60, .28);
+}
+body.mirror-world #mirror-vortex {
+  filter: drop-shadow(0 0 10px rgba(96, 86, 58, .38));
+}
+body.mirror-world .mirror-slot {
+  color: #3b3a33;
+  background: rgba(255, 255, 255, .78);
+  border-color: #c9c3b2;
+}
+body.mirror-world .mirror-slot:hover {
+  border-color: #a8832e;
+  color: #1e1d1a;
+  box-shadow: 0 0 18px rgba(150, 130, 80, .28);
+}
+body.mirror-world .mirror-slot.mirror-self {
+  border-color: #b99a45;
+  color: #7a5f1f;
+  background: rgba(216, 199, 138, .22);
+}
+body.mirror-world .mirror-slot.mirror-self:hover {
+  border-color: #9c7c28;
+  color: #5a4510;
+  box-shadow: 0 0 20px rgba(170, 140, 60, .38);
+}
+body.mirror-world .mirror-empty { color: #8a8578; }
+body.mirror-world #mirror-tip { color: #7d7768; }
+
 /* ---------- 终章：门后的白 ---------- */
 #ending-overlay {
   position: fixed;
@@ -924,7 +987,7 @@ const CHARS = {
 
   '冰': { kind: 'entity', solid: true, sub: '它冷得发白，边缘挂着水汽',
          pickable: false, pickableWhy: '冰，搬不动',
-         dismantle: null, dismantleWhy: '冰，一拆就碎',
+         dismantle: ['冫', '水'],
          combine: { '木': { action: 'melt' } } },
   '口': { kind: 'entity', solid: true, sub: '一个空空的“口”',
          pickable: true,
@@ -955,10 +1018,19 @@ const CHARS = {
          dismantle: null, dismantleWhy: '水，拆不开' },
   '关': { kind: 'entity', solid: true, sub: '关着的“关”',
          pickable: true,
-         dismantle: null, dismantleWhy: '拆不开' },
+         dismantle: null, dismantleWhy: '拆不开',
+         assemble: [['天', '丷', '关']] },
   '开': { kind: 'entity', solid: true, sub: '开着的“开”',
          pickable: true,
          dismantle: null, dismantleWhy: '拆不开' },
+  '棍': { kind: 'entity', solid: true, sub: '一根光溜溜的木棍，握在手里正称手',
+         pickable: true,
+         dismantle: null, dismantleWhy: '棍身结实，拆不开' },
+  '地': { kind: 'entity', solid: true, sub: '一块沉实的“地”，被霜围着',
+         pickable: true,
+         dismantle: null, dismantleWhy: '地，拆不开' },
+  '霜': { kind: 'scene', solid: false, cls: 'frost',
+         sub: '薄薄一层霜，踩上去会打滑' },
 
   '门': { kind: 'entity', solid: true, cls: 'door', portal: true, sub: '门后是另一间屋子',
          pickable: false, pickableWhy: '门不是拿来拿的',
@@ -1065,16 +1137,16 @@ const LEVELS = [
     title: '镜 室',
     map: [
       '墙墙墙墙墙墙墙墙墙墙墙墙墙',
-      '墙....镜......墙',
+      '墙冰棍..镜......墙',
       '墙.日.........墙',
-      '墙..我........墙',
-      '墙...........门',
+      '墙..我..霜.....墙',
+      '墙....霜地霜....门',
+      '墙.....霜.....墙',
       '墙...........墙',
-      '墙..木........墙',
-      '墙.........冰.墙',
+      '墙...........墙',
       '墙墙墙墙墙墙墙墙墙墙墙墙墙',
     ],
-    intro: '镜室。屋子比前两间都冷。“镜”立在北面，镜面蒙着一层白雾，照不出人。屋里有一束“日”、一段“木”，角落里一块“冰”泛着白。东墙那扇“门”，纹丝不动。',
+    intro: '镜室。屋子比前两间都冷。“镜”立在北面，镜面蒙着一层白雾，照不出人。左上是“冰”，冰旁搁着一根“棍”。屋子正中，一块“地”被四面“霜”围着。东墙那扇“门”，纹丝不动。',
     mirrorFogged: true,   // 镜面蒙雾：得先给它一点“日”头
     iceRelease: '关',     // 这块冰里沉着“关”，没有墙里的“声”
     doorLock: true,       // 拿着“开”，门才开
@@ -1117,6 +1189,7 @@ const state = {
   ending: false,           // 已走到终章
   mirrorWorld: false,      // 已与镜中的“我”换位：房间倒转、背景化白
   mirrorHidden: [],        // 镜中世界里不存在的纯白字（暂存，退出时还原）
+  frostSliding: false,     // “霜”触发的打滑位移正在进行
 };
 
 /* DOM 引用 */
@@ -1368,6 +1441,7 @@ function loadLevel(i) {
   state.ending = false;
   state.mirrorWorld = false;
   state.mirrorHidden = [];
+  state.frostSliding = false;
   document.body.classList.remove('mirror-world');
 
   mapEl.querySelectorAll('.cell-char, .range-tile').forEach(el => el.remove());
@@ -1512,13 +1586,18 @@ function tryMove(dx, dy) {
       return;
     }
 
-    /* 冰：撞上去先听见一声；手持“钻”会被劝住，改走温和的化冰方式。
-       “日”只晒得化镜上的薄雾，晒不穿墙角这块厚冰——要更烈的热 */
+    /* 冰：手持“日”或“钻”时各有劝告；空手撞冰则打开对话框，
+       可以直接把它拆成“冫”和“水”。 */
     if (target.char === '冰') {
-      if (held === '日') narrate('日头贴上去，冰面只亮了一亮——这块冰厚得晒不穿，得用更烈的热。');
-      else narrate(held === '钻'
-        ? '这样似乎会破坏冰里的东西，还是采取更温和的方式吧。'
-        : '冰里似乎有什么东西……');
+      if (held === '日') {
+        narrate('日头贴上去，冰面只亮了一亮——这块冰厚得晒不穿，得用更烈的热。');
+        return;
+      }
+      if (held === '钻') {
+        narrate('这样似乎会破坏冰里的东西，还是采取更温和的方式吧。');
+        return;
+      }
+      openDialog(target);
       return;
     }
 
@@ -1590,6 +1669,54 @@ function movePlayer(nx, ny, underEntity) {
     refreshSelfBlank();
     checkSayComplete(false);
   }
+
+  /* 踩上“霜”：脚下一滑，顺着刚才的移动方向再滑 3 格 */
+  if (underEntity && underEntity.char === '霜' && !state.frostSliding) {
+    const f = state.player.facing || { dx: 0, dy: 1 };
+    frostSlide(f.dx, f.dy);
+  }
+}
+
+/* 打滑：每 130ms 强制走一格，最多三格；遇到实心字就停下 */
+function frostSlide(dx, dy) {
+  if (state.frostSliding || (!dx && !dy)) return;
+  state.frostSliding = true;
+  state.animating = true;   // 滑行期间不接受输入
+  let left = 3;
+
+  const step = () => {
+    if (state.dead || state.ending || left <= 0) {
+      state.frostSliding = false;
+      state.animating = false;
+      return;
+    }
+    const nx = state.player.x + dx, ny = state.player.y + dy;
+    if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) {
+      state.frostSliding = false;
+      state.animating = false;
+      return;
+    }
+    if (state.leash) {
+      const L = state.leash;
+      if (nx < L.x1 || nx > L.x2 || ny < L.y1 || ny > L.y2) {
+        sfx.bump();
+        state.frostSliding = false;
+        state.animating = false;
+        return;
+      }
+    }
+    const target = entityAt(nx, ny);
+    if (target && target.solid) {   // 撞上字：滑行到此为止
+      bumpFx(dx, dy, target);
+      state.frostSliding = false;
+      state.animating = false;
+      return;
+    }
+    movePlayer(nx, ny, target);
+    left--;
+    later(step, 130);
+  };
+  later(step, 130);
 }
 
 /* 撞击动画：主角顶一下 + 目标字抖动 */
@@ -2507,6 +2634,7 @@ const MIRROR_PAIRS = {
   '水': '火', '火': '水',
   '关': '开', '开': '关',
   '天': '地', '地': '天',
+  '冫': '天',
 };
 
 /* 镜面发烫：火就烤在镜前，镜子暂时照不出字（镜中世界里所有墙镜一起变烫） */
@@ -2568,6 +2696,10 @@ function warpGlyph(src, dst, geo, twist, shrink, alpha, ripPhase) {
   const { w, h, cx, cy, R, rd, ad, s3, c3 } = geo;
   const dd = dst.data;
   const cs = Math.cos(ripPhase), sn = Math.sin(ripPhase);
+  /* 主世界用镜蓝，镜中世界改用墨色，白底上才看得见 */
+  const cr = state.mirrorWorld ? 43 : 223;
+  const cg = state.mirrorWorld ? 43 : 234;
+  const cb = state.mirrorWorld ? 51 : 245;
   dd.fill(0);
   for (let i = 0; i < rd.length; i++) {
     const r0 = rd[i];
@@ -2587,7 +2719,7 @@ function warpGlyph(src, dst, geo, twist, shrink, alpha, ripPhase) {
             + (src[i01 + 3] * (1 - fx) + src[i11 + 3] * fx) * fy;
     if (a < 2) continue;
     const o = i << 2;
-    dd[o] = 223; dd[o + 1] = 234; dd[o + 2] = 245;
+    dd[o] = cr; dd[o + 1] = cg; dd[o + 2] = cb;
     dd[o + 3] = a * alpha;
   }
 }
@@ -2640,9 +2772,16 @@ function playMirrorMorph(fromChar, toChar, onDone) {
   function flash(t) {
     const r = 6 + easeOut(t) * Math.min(w, h) * .62;
     const g = ctx.createRadialGradient(geo.cx, geo.cy, 0, geo.cx, geo.cy, r);
-    g.addColorStop(0, `rgba(255, 255, 255, ${(0.95 * (1 - t)).toFixed(3)})`);
-    g.addColorStop(.45, `rgba(198, 226, 255, ${(0.45 * (1 - t)).toFixed(3)})`);
-    g.addColorStop(1, 'rgba(160, 200, 255, 0)');
+    if (state.mirrorWorld) {
+      /* 白底上改用暖金色的镜心光 */
+      g.addColorStop(0, `rgba(216, 199, 138, ${(0.85 * (1 - t)).toFixed(3)})`);
+      g.addColorStop(.45, `rgba(178, 156, 96, ${(0.34 * (1 - t)).toFixed(3)})`);
+      g.addColorStop(1, 'rgba(178, 156, 96, 0)');
+    } else {
+      g.addColorStop(0, `rgba(255, 255, 255, ${(0.95 * (1 - t)).toFixed(3)})`);
+      g.addColorStop(.45, `rgba(198, 226, 255, ${(0.45 * (1 - t)).toFixed(3)})`);
+      g.addColorStop(1, 'rgba(160, 200, 255, 0)');
+    }
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
   }
