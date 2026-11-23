@@ -215,6 +215,14 @@ body.mirror-world #player .glyph {
   animation: none;
   text-shadow: 0 0 10px rgba(255, 255, 255, .55);
 }
+/* 纯黑的“一”：主世界看不见，镜中世界的白底上才显形 */
+.cell-char.void-one {
+  visibility: hidden;
+  color: #000;
+  text-shadow: none;
+  animation: none;
+}
+body.mirror-world .cell-char.void-one { visibility: visible; }
 .cell-char.scene.tint-brown {
   color: #8f4a30;
   text-shadow: 0 0 6px rgba(143, 74, 48, .25);
@@ -1160,6 +1168,7 @@ const LEVELS = [
     intro: '镜室。屋子比前两间都冷。“镜”立在北面，镜面蒙着一层白雾，照不出人。左上是“冰”，冰旁搁着一根“棍”。屋子正中，一块“地”被四面“霜”围着。东墙那扇“门”，纹丝不动。',
     mirrorFogged: true,   // 镜面蒙雾：得先给它一点“日”头
     earthSoft: true,      // “地”初始没有碰撞箱，霜被烧红的木融化后才落定
+    hiddenOne: { x: 11, y: 7 },   // 右下角那道纯黑的“一”，只在镜中世界显形
     iceRelease: '关',     // 这块冰里沉着“关”，没有墙里的“声”
     doorLock: true,       // 拿着“开”，门才开
   },
@@ -1330,6 +1339,8 @@ function buildMap() {
   playerEl.innerHTML = '<span class="glyph">我</span><span id="held-char"></span>';
   setPos(playerEl, state.player.x, state.player.y);
   mapEl.appendChild(playerEl);
+
+  if (state.level.hiddenOne) spawnBlackOne(state.level.hiddenOne.x, state.level.hiddenOne.y);
 }
 
 function renderLeash() {
@@ -1577,6 +1588,12 @@ function tryMove(dx, dy) {
     const held = state.player.held;
     /* 手持配方优先：连没有碰撞箱的字（如“霜”）也要先接住配方 */
     const combo = held && target.def.combine && target.def.combine[held];
+    /* “日”碰上霜：霜冻得死死的，晒不化 */
+    if (held === '日' && target.char === '霜') {
+      bumpFx(dx, dy, target);
+      narrate('霜，冻得死死的。');
+      return;
+    }
     if (!target.solid && !combo) {   // 可穿过的字（草、灭、霜）
       movePlayer(nx, ny, target);
       return;
@@ -1694,6 +1711,10 @@ function movePlayer(nx, ny, underEntity) {
 /* 打滑：每 130ms 强制走一格，最多两格；遇到实心字就停下 */
 function frostSlide(dx, dy) {
   if (state.frostSliding || (!dx && !dy)) return;
+  if (!state.flags.frostHinted) {
+    state.flags.frostHinted = true;
+    narrate('地上霜很滑。');
+  }
   state.frostSliding = true;
   state.animating = true;   // 滑行期间不接受输入
   let left = 2;
@@ -1925,6 +1946,7 @@ function dismantle(entity) {
    爬行期间主角被定身，任意键可跳过。 */
 function dismantleStick(entity) {
   closeDialog();
+  narrate('！');
   state.animating = true;
   sfx.dismantle();
 
@@ -1946,32 +1968,36 @@ function dismantleStick(entity) {
     { x: bagR.left + bagR.width / 2, y: bagR.top + bagR.height / 2 },
     620, giveWood, 24);
 
-  /* “昆”从主角手边爬出，扭着爬向右上角 */
+  /* “昆”从主角手边爬出，沿着一条平滑的弧线一路爬出画面右上角 */
   const p = playerEl.getBoundingClientRect();
   const bug = document.createElement('div');
   bug.className = 'bug-char';
   bug.textContent = '昆';
   document.body.appendChild(bug);
 
-  const sx = p.right - 2, sy = p.top + 8;
-  const ex = innerWidth - 26, ey = 28;
-  const dx = ex - sx, dy = ey - sy;
-  const len = Math.hypot(dx, dy) || 1;
-  const nx = -dy / len, ny = dx / len;
-  const N = 30, frames = [];
+  const sx = p.right - 2, sy = p.bottom - 8;
+  const ex = innerWidth + 26, ey = -26;                        // 一直爬出画面，不再半路消失
+  const cx = sx + (ex - sx) * .55, cy = sy + (ey - sy) * .16;  // 微微上扬的弧线控制点
+  const perpX = -(ey - sy), perpY = ex - sx;
+  const plen = Math.hypot(perpX, perpY) || 1;
+  const N = 48, frames = [];
   bug.style.left = sx + 'px';
   bug.style.top = sy + 'px';
   for (let i = 0; i <= N; i++) {
     const t = i / N;
-    const wig = Math.sin(t * Math.PI * 9) * 12 * (1 - t * .4);
+    const e = t * t * (3 - 2 * t);                             // 起步慢、后程稳
+    const bx = (1 - e) * (1 - e) * sx + 2 * (1 - e) * e * cx + e * e * ex;
+    const by = (1 - e) * (1 - e) * sy + 2 * (1 - e) * e * cy + e * e * ey;
+    const wig = Math.sin(t * Math.PI * 14) * 4.5 * Math.sin(Math.PI * Math.min(1, t * 1.2));
     frames.push({
-      left: (sx + dx * t + nx * wig) + 'px',
-      top: (sy + dy * t + ny * wig) + 'px',
-      transform: `translate(-50%, -50%) rotate(${Math.sin(t * Math.PI * 9) * 26}deg) scale(${1 - t * .45})`,
-      opacity: t > .88 ? Math.max(0, (1 - t) / .12) : 1,
+      left: (bx + perpX / plen * wig) + 'px',
+      top: (by + perpY / plen * wig) + 'px',
+      transform: `translate(-50%, -50%) rotate(${Math.sin(t * Math.PI * 14) * 9}deg) scale(${1 - .35 * e})`,
+      opacity: t < .55 ? 1 : Math.max(0, 1 - (t - .55) / .45),
+      offset: t,
     });
   }
-  bug.animate(frames, { duration: 2300, easing: 'ease-in-out', fill: 'forwards' });
+  bug.animate(frames, { duration: 2400, easing: 'linear', fill: 'forwards' });
 
   let done = false;
   const finish = () => {
@@ -1984,7 +2010,7 @@ function dismantleStick(entity) {
     narrate('“昆”像虫子一样从你手里爬走了，消失在右上角。棍断处只留下一根“木”。');
   };
   state.skipAnim = finish;   // 定身期间任意键可跳过
-  later(finish, 2600);
+  later(finish, 2700);
 }
 
 /* ============================================================
@@ -2962,7 +2988,7 @@ function useMirror(mirror) {
   openMirror(mirror);
 }
 
-/* “日”贴上雾镜：白雾一照就散，凝成一摊可拾起的“水”，镜面照得出人了 */
+/* “日”贴上雾镜：白雾一照就散，镜面照得出人了（不再凝出水） */
 function clearMirrorMist(mirror) {
   if (state.animating) return;
   state.animating = true;
@@ -2972,13 +2998,8 @@ function clearMirrorMist(mirror) {
   mirror.el.classList.add('flash');
   later(() => {
     mirror.el.classList.remove('flash');
-    const cell = mirrorFrontCell(mirror);
-    if (cell) {
-      const water = spawnCharEntity('水', cell.x, cell.y);
-      popIn(water, cell.x, cell.y);
-    }
     state.animating = false;
-    narrate('“日”贴上去，镜面的白雾一照就散，凝成一小摊“水”浮在镜前。镜面终于照得出人了。');
+    narrate('“日”贴上去，镜面的白雾一照就散。镜面终于照得出人了。');
   }, 520);
 }
 
@@ -3172,6 +3193,7 @@ function enterMirrorWorld() {
   state.mirrorWorld = true;
   document.body.classList.add('mirror-world');
   swapWorldObjects();    // 墙→镜、镜→墙、门→窗（对象层面的替换）
+  setBlackOne(true);     // 白底显形，那道纯黑的“一”可以拾取了
   fit();   // 舞台 transform 里带上 180° 旋转，无过渡，瞬间完成
   sfx.combine();
 }
@@ -3182,6 +3204,7 @@ function exitMirrorWorld() {
   state.mirrorWorld = false;
   document.body.classList.remove('mirror-world');
   swapWorldObjects();    // 镜→墙、墙→镜、窗→门，全部换回对象
+  setBlackOne(false);    // 回到主世界，又看不见也摸不着了
   restoreWhiteEntities();
   fit();
   sfx.combine();
@@ -3267,6 +3290,28 @@ function applyWoodColor(el, char) {
   if (!el) return;
   el.classList.remove(...WOOD_CLASSES);
   if (char === '木') el.classList.add(woodColorClass());
+}
+
+/* 纯黑的“一”：主世界看不见也摸不着，镜中世界才显形、可拾取 */
+function spawnBlackOne(x, y) {
+  const def = { kind: 'entity', solid: false, sub: '一道纯黑的“一”，薄得像一道缝',
+                pickable: false, pickableWhy: '它还没有实体',
+                dismantle: null, dismantleWhy: '拆不开' };
+  const el = document.createElement('div');
+  el.className = 'cell-char entity void-one';
+  setCellGlyph(el, '一');
+  setPos(el, x, y);
+  mapEl.appendChild(el);
+  const ent = { char: '一', x, y, kind: 'entity', solid: false, def, el, blackOne: true };
+  state.entities.set(key(x, y), ent);
+}
+
+function setBlackOne(inMirror) {
+  const one = [...state.entities.values()].find(e => e.blackOne);
+  if (!one) return;
+  one.solid = inMirror;
+  one.def = { ...one.def, solid: inMirror, pickable: inMirror,
+              pickableWhy: inMirror ? '' : '它还没有实体' };
 }
 
 function spawnCharEntity(char, x, y) {
