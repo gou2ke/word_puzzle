@@ -229,15 +229,15 @@ html, body {
 }
 
 /* “木”的三种成色：没烧过是棕色，烧着了是红色，被冰浇灭后发灰 */
-.cell-char.wood-color-wood, .bag-slot.wood-color-wood, #held-char.wood-color-wood {
+.cell-char.wood-color-wood, .bag-slot.wood-color-wood, .mirror-slot.wood-color-wood, #held-char.wood-color-wood {
   color: #b08153;
   text-shadow: 0 0 10px rgba(176, 129, 83, .45);
 }
-.cell-char.wood-color-lit, .bag-slot.wood-color-lit, #held-char.wood-color-lit {
+.cell-char.wood-color-lit, .bag-slot.wood-color-lit, .mirror-slot.wood-color-lit, #held-char.wood-color-lit {
   color: #ff6a45;
   text-shadow: 0 0 14px rgba(255, 90, 50, .85);
 }
-.cell-char.wood-color-ash, .bag-slot.wood-color-ash, #held-char.wood-color-ash {
+.cell-char.wood-color-ash, .bag-slot.wood-color-ash, .mirror-slot.wood-color-ash, #held-char.wood-color-ash {
   color: #8a8a86;
   text-shadow: 0 0 8px rgba(150, 150, 145, .22);
 }
@@ -615,6 +615,143 @@ html, body {
   margin-top: 6px;
 }
 
+/* ---------- 镜：地图上的镜子 ---------- */
+.cell-char.mirror { color: #9fc3e0; animation: mirrorGlow 3s ease-in-out infinite; }
+@keyframes mirrorGlow {
+  0%, 100% { text-shadow: 0 0 8px rgba(150, 195, 235, .35); }
+  50%      { text-shadow: 0 0 20px rgba(170, 210, 245, .75); }
+}
+.cell-char.mirror.mirror-frozen { color: #d3e9f4; animation: none; text-shadow: 0 0 18px rgba(205, 238, 255, .6); }
+.cell-char.mirror.mirror-hot { color: #ffab84; animation: none; text-shadow: 0 0 22px rgba(255, 110, 60, .85); }
+
+/* ---------- 镜的全屏界面 ---------- */
+#mirror-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 42%, rgba(26, 30, 38, .97), rgba(2, 3, 6, .99) 72%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .35s;
+}
+#mirror-overlay.show { opacity: 1; pointer-events: auto; }
+#mirror-frame {
+  position: relative;
+  width: 250px; height: 310px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #4a4d58;
+  border-radius: 2px;
+  background: linear-gradient(158deg, rgba(180, 205, 228, .12), rgba(110, 122, 142, .03) 46%, rgba(180, 205, 228, .09));
+  box-shadow: 0 0 60px rgba(140, 180, 220, .16) inset, 0 0 44px rgba(0, 0, 0, .75), 0 0 26px rgba(120, 165, 210, .12);
+  overflow: hidden;
+}
+#mirror-frame::after {
+  content: '';
+  position: absolute;
+  left: -45%; top: -20%;
+  width: 38%; height: 140%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .10), transparent);
+  transform: rotate(18deg);
+  animation: mirrorSheen 5.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes mirrorSheen { 0%, 100% { left: -45%; } 50% { left: 110%; } }
+#mirror-core {
+  font-size: 116px;
+  color: #dfeaf5;
+  text-shadow: 0 0 34px rgba(175, 205, 238, .55);
+  transition: color .25s;
+}
+#mirror-core.spinning { animation: mirrorSpin 1.25s cubic-bezier(.3, .1, .35, 1); }
+@keyframes mirrorSpin {
+  0%   { transform: rotate(0) skew(0) scale(1); filter: blur(0); }
+  28%  { transform: rotate(20deg) skew(9deg) scale(1.14); filter: blur(3px); }
+  56%  { transform: rotate(-16deg) skew(-7deg) scale(1.04); filter: blur(6px); }
+  82%  { transform: rotate(7deg) skew(3deg) scale(1.3); filter: blur(9px); }
+  100% { transform: rotate(0) scale(1); filter: blur(0); }
+}
+#mirror-core.flashing { animation: mirrorFlash .62s ease-out; color: #fff; }
+@keyframes mirrorFlash {
+  0%   { text-shadow: 0 0 12px rgba(255, 255, 255, .45); transform: scale(1); }
+  42%  { text-shadow: 0 0 60px #fff, 0 0 130px #cfe6ff; transform: scale(1.3); }
+  100% { text-shadow: 0 0 34px rgba(185, 215, 245, .7); transform: scale(1); }
+}
+#mirror-core.mirror-shake { animation: mirrorShake .5s; }
+@keyframes mirrorShake {
+  18% { transform: translateX(-9px) rotate(-2deg); }
+  38% { transform: translateX(8px) rotate(2deg); }
+  58% { transform: translateX(-6px); }
+  78% { transform: translateX(4px); }
+}
+#mirror-bag {
+  position: fixed;
+  left: 50%; bottom: 64px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 92vw;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0 20px;
+}
+.mirror-slot {
+  width: 60px; height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  color: #e8e2cc;
+  background: rgba(12, 13, 18, .7);
+  border: 1px solid #3a3c46;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, transform .15s, color .15s;
+}
+.mirror-slot:hover { border-color: #9fc4e8; color: #fff; box-shadow: 0 0 18px rgba(160, 200, 240, .35); transform: translateY(-3px); }
+.mirror-slot.mirror-self { border-color: #7d6a30; color: #d8c78a; background: rgba(216, 199, 138, .07); }
+.mirror-slot.mirror-self:hover { border-color: #d8c78a; color: #ffe9a8; box-shadow: 0 0 20px rgba(216, 199, 138, .45); }
+.mirror-empty { color: #4c4c46; font-size: 13px; letter-spacing: 4px; width: 180px; text-align: center; }
+#mirror-tip {
+  position: fixed;
+  left: 50%; bottom: 26px;
+  transform: translateX(-50%);
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #5d6470;
+  white-space: nowrap;
+}
+
+/* ---------- 终章：门后的白 ---------- */
+#ending-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: #f4f1e8;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 1.6s ease;
+}
+#ending-overlay.show { opacity: 1; pointer-events: auto; }
+#ending-title { font-size: 42px; letter-spacing: 20px; color: #3a362c; text-indent: 20px; opacity: 0; }
+#ending-line1, #ending-line2, #ending-line3 { font-size: 16px; letter-spacing: 2px; color: #4a463c; opacity: 0; }
+#ending-hint { margin-top: 28px; font-size: 12px; letter-spacing: 3px; color: #8d8674; opacity: 0; }
+#ending-overlay.show #ending-title { animation: endingIn 2.2s ease .8s forwards; }
+#ending-overlay.show #ending-line1 { animation: endingIn 2s ease 2.6s forwards; }
+#ending-overlay.show #ending-line2 { animation: endingIn 2s ease 4.6s forwards; }
+#ending-overlay.show #ending-line3 { animation: endingIn 2s ease 6.6s forwards; }
+#ending-overlay.show #ending-hint { animation: endingIn 2s ease 8.8s forwards; }
+@keyframes endingIn { to { opacity: 1; } }
+
 /* ---------- 切关黑幕 ---------- */
 #fade {
   position: fixed;
@@ -666,6 +803,20 @@ html, body {
   <div class="death-fire">火</div>
   <div class="death-text">整间屋子，烧了起来。</div>
   <div class="death-hint">我，没了。　按 R 重来</div>
+</div>
+
+<div id="mirror-overlay">
+  <div id="mirror-frame"><div id="mirror-core">镜</div></div>
+  <div id="mirror-bag"></div>
+  <div id="mirror-tip">点击行囊里的字，放入镜中 · Esc 离开</div>
+</div>
+
+<div id="ending-overlay">
+  <div id="ending-title">终 · 章</div>
+  <div id="ending-line1">门后是一片白。没有墙，没有字，什么都没有。</div>
+  <div id="ending-line2">你走了很久才明白——白，也是一种“字”。它还没有被写。</div>
+  <div id="ending-line3">而镜子里那个“你”，正站在纸的另一面，等着被谁写下。</div>
+  <div id="ending-hint">按 R 回到镜室　·　谢谢你玩《字·界》</div>
 </div>
 
 <div id="fade"></div>
@@ -747,6 +898,24 @@ const CHARS = {
   '钻': { kind: 'entity', solid: true, sub: '锋利的钻头',
          pickable: true,
          dismantle: ['钅', '占'] },
+
+  /* ---------- 镜室的字 ---------- */
+  '镜': { kind: 'entity', solid: true, cls: 'mirror', mirror: true,
+         sub: '一面镜子，照得出字的另一面',
+         pickable: false, pickableWhy: '镜子，搬不动',
+         dismantle: null, dismantleWhy: '镜子，拆不开' },
+  '日': { kind: 'entity', solid: true, sub: '一束日光，握在手里发暖',
+         pickable: true,
+         dismantle: ['口', '一'] },
+  '水': { kind: 'entity', solid: true, sub: '一捧水，捧得住',
+         pickable: true,
+         dismantle: null, dismantleWhy: '水，拆不开' },
+  '关': { kind: 'entity', solid: true, sub: '关着的“关”',
+         pickable: true,
+         dismantle: null, dismantleWhy: '拆不开' },
+  '开': { kind: 'entity', solid: true, sub: '开着的“开”',
+         pickable: true,
+         dismantle: null, dismantleWhy: '拆不开' },
 
   '门': { kind: 'entity', solid: true, cls: 'door', portal: true, sub: '门后是另一间屋子',
          pickable: false, pickableWhy: '门不是拿来拿的',
@@ -846,6 +1015,26 @@ const LEVELS = [
     intro: '空屋。四壁是“墙”，四壁之外，还是“墙”。屋里什么都没有——除了一把“斧”、一张“桌”、一块“石”，和角落里一块化不开的“冰”。还有墙角那条“链”：它拴着你，你的全部世界，只有这四格。',
     sound: true,                 // 这一关的左下角有墙里的“声”
     cracked: [{ x: 2, y: 8 }],   // 房间下方那道带裂缝的墙
+    holeExit: 2,                 // 走进钻开的“洞”，就是镜室
+  },
+  {
+    short: '镜室',
+    title: '镜 室',
+    map: [
+      '墙墙墙墙墙墙墙墙墙墙墙墙墙',
+      '墙....镜......墙',
+      '墙.日.........墙',
+      '墙..我........墙',
+      '墙...........门',
+      '墙...........墙',
+      '墙..木........墙',
+      '墙.........冰.墙',
+      '墙墙墙墙墙墙墙墙墙墙墙墙墙',
+    ],
+    intro: '镜室。屋子比前两间都冷。“镜”立在北面，镜面却结着一层薄冰，照不出人。屋里有一束“日”、一段“木”，角落里一块“冰”泛着白。东墙那扇“门”，纹丝不动。',
+    mirrorFrozen: true,   // 镜面结冰：得先给它一点“日”头
+    iceRelease: '关',     // 这块冰里沉着“关”，没有墙里的“声”
+    doorLock: true,       // 拿着“开”，门才开
   },
 ];
 
@@ -878,6 +1067,10 @@ const state = {
   dead: false,
   fireSpreading: false,
   waterCells: new Set(),   // 水所在的格子，火蔓延不进去
+  mirrorOpen: false,       // 镜的全屏界面是否打开
+  mirrorBusy: false,       // 镜中的字正在翻转
+  mirrorEl: null,          // 当前这面镜子的实体
+  ending: false,           // 已走到终章
 };
 
 /* DOM 引用 */
@@ -972,6 +1165,10 @@ function buildMap() {
       setPos(el, x, y);
       mapEl.appendChild(el);
       const ent = { char: ch, x, y, kind: def.kind, solid: def.solid, def, el };
+      if (def.mirror) {   // 镜子：这一关开局可能结着冰
+        ent.frozen = !!state.level.mirrorFrozen;
+        if (ent.frozen) el.classList.add('mirror-frozen');
+      }
       if (crackedSet.has(key(x, y))) {   // 带裂缝的墙：钻头唯一能钻开的地方
         ent.cracked = true;
         el.classList.add('wall-cracked');
@@ -1085,6 +1282,8 @@ function loadLevel(i) {
   mapEl.querySelectorAll('.sound-fly').forEach(el => el.remove());
   $('overlay').classList.remove('show');
   $('death-overlay').classList.remove('show');
+  $('mirror-overlay').classList.remove('show');
+  $('ending-overlay').classList.remove('show');
   $('dis-stage').querySelectorAll('.dis-part').forEach(p => p.remove());
   closeDialog();
 
@@ -1103,6 +1302,10 @@ function loadLevel(i) {
   state.dead = false;
   state.fireSpreading = false;
   state.waterCells = new Set();
+  state.mirrorOpen = false;
+  state.mirrorBusy = false;
+  state.mirrorEl = null;
+  state.ending = false;
 
   mapEl.querySelectorAll('.cell-char, .range-tile').forEach(el => el.remove());
   renderLevelSelect();
@@ -1123,6 +1326,7 @@ function loadLevel(i) {
 let switching = false;
 function gotoLevel(i) {
   if (switching) return;
+  if (i >= LEVELS.length) { showEnding(); return; }   // 最后一扇门后，没有下一关
   switching = true;
   const fade = $('fade');
   fade.classList.add('show');
@@ -1251,7 +1455,16 @@ function tryMove(dx, dy) {
     }
 
     if (target.kind === 'scene') { onBumpScene(target); return; }
-    if (target.def.portal) { gotoLevel(state.levelIndex + 1); return; }
+    if (target.def.mirror) { useMirror(target); return; }
+    if (target.def.portal) {
+      if (state.level.doorLock) {
+        if (state.player.held === '开') openDoorAndEnd();
+        else narrate('门锁着。门板上浮着一个淡淡的“关”字——还差一把“开”。');
+        return;
+      }
+      gotoLevel(state.levelIndex + 1);
+      return;
+    }
 
     /* 可交互实体：击打 > 合体 > 火 > 对话框 */
     if (held && target.def.strike && target.def.strike.with === held) {
@@ -1283,6 +1496,12 @@ function movePlayer(nx, ny, underEntity) {
       underEntity.el.classList.add('rustle');
     }
     if (underEntity.char === '灭') completeStep('pass');   // 穿过灭
+  }
+
+  /* 钻开的“洞”：走下去，就是下一间屋子 */
+  if (underEntity && underEntity.char === '洞' && state.level.holeExit !== undefined) {
+    gotoLevel(state.level.holeExit);
+    return;
   }
 
   /* 左下角：带着“听”才听得见；空着手，只有一片听不见的动静。
@@ -1520,6 +1739,10 @@ function combineChars(heldChar, target, resultChar) {
         target.el.classList.add('dead');
         state.animating = false;
         completeStep('combine');
+        if (target.fromMirror) {   // 镜前那团火终于熄了，镜面凉下来
+          setMirrorHot(false);
+          later(() => narrate('“一”压下去，“火”成了“灭”。镜面渐渐凉了，又能照出人了。'), 260);
+        }
       }, 420);
     }, 22);
 }
@@ -1688,8 +1911,9 @@ function meltIce(heldChar, target) {
       for (let x = tx - 1; x >= 1; x--) {
         if (!taken(x, ty)) { kx = x; break; }
       }
-      const kou = spawnCharEntity('口', kx, ty);
-      popIn(kou, kx, ty);
+      const released = state.level.iceRelease || '口';
+      const bonus = spawnCharEntity(released, kx, ty);
+      popIn(bonus, kx, ty);
       /* 冰把火浇灭了：木还是那块木，只是浸成了灰色 */
       state.flags.litWood = false;
       state.flags.ashWood = true;
@@ -1697,12 +1921,17 @@ function meltIce(heldChar, target) {
         setHeld(heldChar);
         state.animating = false;
       }, 26);
-      narrate('指尖粘稠拉丝，你意识到这团冰生前居然是口水！');
-      /* 隔3秒，左下墙里才渗出一声“声”——“声”字与这句话同时出现，不提前 */
-      later(() => {
-        narrate('与此同时，左下的墙里，渗出一声极轻的“声”。');
-        spawnSound();
-      }, 3000);
+      if (state.level.iceRelease) {
+        /* 镜室的冰：水底沉着那个字，没有墙里的“声” */
+        narrate('冰“咔”地裂开，塌成一摊水。');
+      } else {
+        narrate('指尖粘稠拉丝，你意识到这团冰生前居然是口水！');
+        /* 隔3秒，左下墙里才渗出一声“声”——“声”字与这句话同时出现，不提前 */
+        later(() => {
+          narrate('与此同时，左下的墙里，渗出一声极轻的“声”。');
+          spawnSound();
+        }, 3000);
+      }
     }, 480);
   }, 22);
 }
@@ -1933,7 +2162,7 @@ function askBranch(char) {
     return;
   }
   if (char === '钻') {
-    narrate('“钻头?那边的墙上刚好有个细小的裂缝！”');
+    narrate('“钻头?那边的墙上刚好有个细小的裂缝！钻开它！”');
     state.flags.drillReady = true;
   }
 }
@@ -2088,6 +2317,8 @@ function spawnFire(x, y, char) {
     const stillBurning = [...state.entities.values()].some(e => e.char === '火');
     if (stillBurning) beginFireSpread();
   }, 20000);
+
+  return ent;
 }
 
 /* 闪到火左侧一格（左侧被占则依次让向右、上、下） */
@@ -2192,10 +2423,226 @@ function dieByFire() {
   state.animating = true;
   closeDialog();
   toggleBag(false);
+  closeMirror();
   $('overlay').classList.remove('show');
   $('death-overlay').classList.add('show');
   narrate('火吞掉了最后一格。我，也烧没了。');
   sfx.fire();
+}
+
+/* ============================================================
+   十二·六、镜室：把字放进镜里，翻成它的另一面
+   ============================================================ */
+/* 镜中的字对：只有“讲得通”的反面，才照得出来 */
+const MIRROR_PAIRS = {
+  '日': '月', '月': '日',
+  '水': '火', '火': '水',
+  '关': '开', '开': '关',
+  '天': '地', '地': '天',
+};
+
+function mirrorEntity() {
+  return [...state.entities.values()].find(e => e.def && e.def.mirror);
+}
+
+/* 镜面发烫：火就烤在镜前，镜子暂时照不出字 */
+function setMirrorHot(hot) {
+  state.flags.mirrorHot = hot;
+  const m = mirrorEntity();
+  if (m) m.el.classList.toggle('mirror-hot', hot);
+}
+
+/* 镜前的空地：优先正下方，再向左右铺开，避开主角站着的格子 */
+function mirrorFrontCell(mirror) {
+  const y = mirror.y + 1;
+  const xs = [mirror.x];
+  for (let d = 1; d <= 3; d++) { xs.push(mirror.x + d, mirror.x - d); }
+  for (const x of xs) {
+    if (x < 1 || x > COLS - 2 || y < 1 || y > ROWS - 2) continue;
+    if (x === state.player.x && y === state.player.y) continue;
+    if (entityAt(x, y)) continue;
+    return { x, y };
+  }
+  return findSpawnCell(mirror);
+}
+
+/* 撞上镜面：结冰 / 发烫 / 可用，三种状态 */
+function useMirror(mirror) {
+  if (mirror.frozen) {
+    if (state.player.held === '日') meltMirrorIce(mirror);
+    else narrate('镜面结着冰，照不出人。也许该给它一点“日”头。');
+    return;
+  }
+  if (state.flags.mirrorHot) {
+    narrate('镜面烫得照不出人。得先灭火——可拿什么压？');
+    return;
+  }
+  openMirror(mirror);
+}
+
+/* “日”贴上冰镜：冰化成一摊可拾起的“水”，镜面照得出人了 */
+function meltMirrorIce(mirror) {
+  if (state.animating) return;
+  state.animating = true;
+  sfx.combine();
+  mirror.frozen = false;
+  mirror.el.classList.remove('mirror-frozen');
+  mirror.el.classList.add('flash');
+  later(() => {
+    mirror.el.classList.remove('flash');
+    const cell = mirrorFrontCell(mirror);
+    if (cell) {
+      const water = spawnCharEntity('水', cell.x, cell.y);
+      popIn(water, cell.x, cell.y);
+    }
+    state.animating = false;
+    narrate('“日”贴上去，镜面的冰“咔”地裂开，化成一小摊“水”浮在镜前。镜面终于照得出人了。');
+  }, 520);
+}
+
+function openMirror(mirror) {
+  state.mirrorOpen = true;
+  state.mirrorBusy = false;
+  state.mirrorEl = mirror;
+  const core = $('mirror-core');
+  core.textContent = '镜';
+  core.className = '';
+  $('mirror-overlay').classList.add('show');
+  toggleBag(false);
+  renderMirrorBag();
+  sfx.open();
+}
+
+function closeMirror() {
+  state.mirrorOpen = false;
+  state.mirrorBusy = false;
+  state.mirrorEl = null;
+  $('mirror-overlay').classList.remove('show');
+}
+
+/* 镜中的行囊：所有字排成一行，最右永远站着一个金色的“我” */
+function renderMirrorBag() {
+  const row = $('mirror-bag');
+  row.innerHTML = '';
+  if (!state.bag.length) {
+    const em = document.createElement('div');
+    em.className = 'mirror-empty';
+    em.textContent = '行 囊 空 空';
+    row.appendChild(em);
+  }
+  state.bag.forEach(char => {
+    const slot = document.createElement('div');
+    slot.className = 'mirror-slot';
+    slot.textContent = char;
+    applyWoodColor(slot, char);
+    slot.onclick = () => { if (!state.mirrorBusy) convertInMirror(char); };
+    row.appendChild(slot);
+  });
+  const me = document.createElement('div');
+  me.className = 'mirror-slot mirror-self';
+  me.textContent = '我';
+  me.onclick = () => { if (!state.mirrorBusy) mirrorSwapSelf(); };
+  row.appendChild(me);
+}
+
+/* 放字入镜：有另一面的，旋转扭曲后翻成新字；没有的，晃一圈退回行囊 */
+function convertInMirror(char) {
+  const to = MIRROR_PAIRS[char];
+  const core = $('mirror-core');
+  if (!to) {
+    core.classList.remove('mirror-shake');
+    void core.offsetWidth;
+    core.classList.add('mirror-shake');
+    sfx.bump();
+    narrate('“' + char + '”落进镜里，镜面晃了一下，什么也没变。它退回了行囊。');
+    return;
+  }
+
+  state.mirrorBusy = true;
+  const idx = state.bag.indexOf(char);
+  if (idx >= 0) state.bag.splice(idx, 1);   // 字离开行囊，进了镜中
+  if (state.player.held === char) setHeld(null);   // 手里的字也跟着进了镜子
+  renderMirrorBag();
+  core.textContent = char;
+  core.className = 'spinning';
+  sfx.combine();
+
+  later(() => {
+    if (state.dead || state.ending) return;
+    core.className = 'flashing';
+    core.textContent = to;
+    later(() => {
+      if (state.dead || state.ending) return;
+      core.className = '';
+      if (to === '火') {
+        /* “火”拿不住：直接从镜面里跌到镜前，开始 20 秒倒计时 */
+        const cell = state.mirrorEl ? mirrorFrontCell(state.mirrorEl) : null;
+        if (cell) {
+          const fire = spawnFire(cell.x, cell.y, '火');
+          fire.fromMirror = true;
+        }
+        setMirrorHot(true);
+        narrate('“水”在镜中越转越急，“腾”地烧了起来——“火”从镜面里跌出来，落在镜前。镜面被烤得发烫。');
+      } else {
+        state.bag.push(to);
+        narrate(to === '开'
+          ? '“关”在镜里打了个转，翻成了“开”。镜面上，门的方向亮了一下。'
+          : '“' + char + '”在镜中翻了个面，成了“' + to + '”。');
+      }
+      renderBag();
+      popBagBtn();
+      state.mirrorBusy = false;
+      closeMirror();
+    }, 620);
+  }, 1300);
+}
+
+/* 彩蛋：镜子里也有一个“我”。把它拖进来，两个“我”换了位置 */
+function mirrorSwapSelf() {
+  state.mirrorBusy = true;
+  const core = $('mirror-core');
+  core.textContent = '我';
+  core.className = 'spinning';
+  sfx.combine();
+  later(() => {
+    if (state.dead || state.ending) return;
+    core.className = 'flashing';
+    core.textContent = '你';
+    later(() => {
+      if (state.dead || state.ending) return;
+      state.flags.mirrorSwapped = true;
+      playerEl.innerHTML = '你<span id="held-char"></span>';
+      const hc = $('held-char');
+      hc.textContent = state.player.held || '';
+      applyWoodColor(hc, state.player.held);
+      state.mirrorBusy = false;
+      closeMirror();
+      narrate('镜子里的人朝你笑了笑。你们换了位置。');
+    }, 620);
+  }, 1300);
+}
+
+/* 门：拿着“开”撞上去，门后就是终章 */
+function openDoorAndEnd() {
+  if (state.animating) return;
+  state.animating = true;
+  sfx.combine();
+  const idx = state.bag.indexOf('开');
+  if (idx >= 0) state.bag.splice(idx, 1);
+  setHeld(null);
+  narrate('“开”嵌进门里——门，开了。');
+  later(showEnding, 1800);
+}
+
+function showEnding() {
+  if (state.ending) return;
+  state.ending = true;
+  state.animating = true;
+  closeDialog();
+  toggleBag(false);
+  closeMirror();
+  $('ending-overlay').classList.add('show');
+  sfx.combine();
 }
 
 /* ============================================================
@@ -2342,7 +2789,7 @@ function dropChar(char, fromRect) {
     if (lost) {
       later(() => {
         narrate('哦不....');
-        later(() => narrate('“' + char + '”字被你扔到了你够不到的地方。'), 2000);
+        later(() => narrate('“' + char + '”字被你扔到了你所触及不到的地方。'), 2000);
       }, 2000);
     }
   });
@@ -2408,6 +2855,13 @@ document.addEventListener('keydown', e => {
   /* R 重开本关：任何时候都生效 */
   if (k === 'r') { gotoLevel(state.levelIndex); return; }
   if (switching || state.dead) return;
+  if (state.ending) return;
+
+  /* 镜的全屏界面：只认 Esc（翻转动画中不响应），其余按键一律忽略 */
+  if (state.mirrorOpen) {
+    if (k === 'escape' && !state.mirrorBusy) closeMirror();
+    return;
+  }
 
   /* 拆字动画进行中：任意键跳过，直接收尾 */
   if (state.skipAnim) { state.skipAnim(); return; }
@@ -2459,6 +2913,12 @@ document.addEventListener('mousedown', e => {
 /* 点击对话框之外即关闭（行囊是常驻侧栏，只由行囊按钮收合） */
 document.addEventListener('mousedown', e => {
   if (state.dialogFor && !dialogEl.contains(e.target)) closeDialog();
+});
+
+/* 镜的全屏界面：点镜子与行囊之外的地方，退出 */
+document.addEventListener('mousedown', e => {
+  if (!state.mirrorOpen || state.mirrorBusy) return;
+  if (!e.target.closest('#mirror-frame, #mirror-tip, #mirror-bag')) closeMirror();
 });
 document.addEventListener('contextmenu', e => e.preventDefault());
 
