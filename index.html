@@ -1107,6 +1107,7 @@ const state = {
   mirrorWarpRaf: 0,        // 螺旋变形的动画帧句柄
   ending: false,           // 已走到终章
   mirrorWorld: false,      // 已与镜中的“我”换位：房间倒转、背景化白
+  mirrorHidden: [],        // 镜中世界里不存在的纯白字（暂存，退出时还原）
 };
 
 /* DOM 引用 */
@@ -1126,6 +1127,9 @@ function setPos(el, gx, gy) {
   el.style.setProperty('--ty', (gy * CELL) + 'px');
 }
 
+/* 主世界与镜中世界的同义字：只换显示的字，实体规则不变 */
+const MIRROR_WORLD_GLYPHS = { '墙': '镜', '镜': '墙', '门': '窗', '窗': '门' };
+
 /* 字格里的字单独包一层：镜中世界只把字本身转正，
    格子的位移、抖动、缩放动画都不受影响 */
 function setCellGlyph(el, ch) {
@@ -1136,7 +1140,12 @@ function setCellGlyph(el, ch) {
     g.className = 'glyph';
     el.appendChild(g);
   }
-  g.textContent = ch;
+  g.textContent = state.mirrorWorld && MIRROR_WORLD_GLYPHS[ch] ? MIRROR_WORLD_GLYPHS[ch] : ch;
+}
+
+/* 进出镜中世界后，把场上的字统一刷成对应世界的写法 */
+function refreshMirrorGlyphs() {
+  for (const ent of state.entities.values()) setCellGlyph(ent.el, ent.char);
 }
 
 /* 动画计时器：切关时统一清掉，避免旧关卡的延时回调污染新关卡 */
@@ -1357,6 +1366,7 @@ function loadLevel(i) {
   cancelMirrorMorph();
   state.ending = false;
   state.mirrorWorld = false;
+  state.mirrorHidden = [];
   document.body.classList.remove('mirror-world');
 
   mapEl.querySelectorAll('.cell-char, .range-tile').forEach(el => el.remove());
@@ -1455,6 +1465,8 @@ function spawnStepEntity(cfg) {
    ============================================================ */
 function tryMove(dx, dy) {
   if (state.animating || state.dialogFor) return;
+  /* 镜中世界整个画面倒了 180°，按键方向跟着画面走，操作手感保持正常 */
+  if (state.mirrorWorld) { dx = -dx; dy = -dy; }
   state.player.facing = { dx, dy };   // 记住朝向，放下时优先放在身前
   const nx = state.player.x + dx, ny = state.player.y + dy;
   if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) return;
@@ -2841,11 +2853,36 @@ function mirrorSwapSelf() {
   });
 }
 
+/* 主世界里颜色是纯白（#FFFFFF）的字，进入镜中世界后不存在：
+   先按主世界样式取色，从场上摘下来，退出镜中世界时原样放回 */
+function hideWhiteEntities() {
+  state.mirrorHidden = [];
+  for (const ent of [...state.entities.values()]) {
+    const c = getComputedStyle(ent.el).color.replace(/\s+/g, '');
+    if (c !== 'rgb(255,255,255)') continue;
+    state.mirrorHidden.push(ent);
+    state.entities.delete(key(ent.x, ent.y));
+    ent.el.style.display = 'none';
+  }
+}
+
+function restoreWhiteEntities() {
+  for (const ent of state.mirrorHidden) {
+    const k = key(ent.x, ent.y);
+    if (state.entities.has(k)) { ent.el.remove(); continue; }   // 格子已被别的东西占住
+    ent.el.style.display = '';
+    state.entities.set(k, ent);
+  }
+  state.mirrorHidden = [];
+}
+
 /* 换位之后：整间屋子瞬间绕屏幕中心倒转 180°，背景变成白色 */
 function enterMirrorWorld() {
   if (state.mirrorWorld) return;
+  hideWhiteEntities();   // 必须在加 mirror-world 类之前，按主世界的颜色判定
   state.mirrorWorld = true;
   document.body.classList.add('mirror-world');
+  refreshMirrorGlyphs();   // 墙↔镜、门↔窗
   fit();   // 舞台 transform 里带上 180° 旋转，无过渡，瞬间完成
   sfx.combine();
 }
@@ -2855,6 +2892,8 @@ function exitMirrorWorld() {
   if (!state.mirrorWorld) return;
   state.mirrorWorld = false;
   document.body.classList.remove('mirror-world');
+  restoreWhiteEntities();
+  refreshMirrorGlyphs();   // 字全部换回主世界的写法
   fit();
   sfx.combine();
 }
