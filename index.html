@@ -22,6 +22,24 @@ html, body {
 /* 与镜中的“我”换位之后：背景化成一整张白纸 */
 body.mirror-world { background: #f4f1e8; }
 
+/* 镜中世界：房间整体倒转，但字与文字面板各自转正，保证可读 */
+body.mirror-world .cell-char .glyph,
+body.mirror-world #held-char {
+  display: inline-block;
+  transform: rotate(180deg);
+}
+/* 叙述栏、目标条跟着房间换了位置，但内容转正：
+   打字机因此仍从左上角开始吐字 */
+body.mirror-world #objective-bar,
+body.mirror-world #narrative { transform: rotate(180deg); }
+body.mirror-world #bag-panel { transform: translateX(10px) rotate(180deg); }
+body.mirror-world #bag-panel.show { transform: rotate(180deg); }
+/* 白纸上的主角改成墨色，避免白字白底看不清 */
+body.mirror-world #player .glyph {
+  color: #2b2b33;
+  text-shadow: 0 0 10px rgba(43, 43, 51, .28);
+}
+
 /* ---------- 整体舞台 ---------- */
 #stage {
   position: fixed;
@@ -1108,6 +1126,19 @@ function setPos(el, gx, gy) {
   el.style.setProperty('--ty', (gy * CELL) + 'px');
 }
 
+/* 字格里的字单独包一层：镜中世界只把字本身转正，
+   格子的位移、抖动、缩放动画都不受影响 */
+function setCellGlyph(el, ch) {
+  let g = el.firstElementChild;
+  if (!g || !g.classList.contains('glyph')) {
+    el.textContent = '';
+    g = document.createElement('span');
+    g.className = 'glyph';
+    el.appendChild(g);
+  }
+  g.textContent = ch;
+}
+
 /* 动画计时器：切关时统一清掉，避免旧关卡的延时回调污染新关卡 */
 const timers = new Set();
 function later(fn, ms) {
@@ -1179,7 +1210,7 @@ function buildMap() {
         (def.cls ? ' ' + def.cls : '');
       const skin = state.level.skin && state.level.skin[ch];   // 关卡专属配色
       if (skin) el.classList.add(skin);
-      el.textContent = ch;
+      setCellGlyph(el, ch);
       setPos(el, x, y);
       mapEl.appendChild(el);
       const ent = { char: ch, x, y, kind: def.kind, solid: def.solid, def, el };
@@ -1200,7 +1231,7 @@ function buildMap() {
   playerEl.id = 'player';
   playerEl.className = 'cell-char';
   playerEl.style.transition = 'transform .13s ease-out';
-  playerEl.innerHTML = '我<span id="held-char"></span>';
+  playerEl.innerHTML = '<span class="glyph">我</span><span id="held-char"></span>';
   setPos(playerEl, state.player.x, state.player.y);
   mapEl.appendChild(playerEl);
 }
@@ -1756,7 +1787,7 @@ function combineChars(heldChar, target, resultChar) {
       target.el.classList.add('flash');
       later(() => {
         target.char = resultChar;
-        target.el.textContent = resultChar;
+        setCellGlyph(target.el, resultChar);
         target.solid = false;
         target.el.classList.remove('flash', 'entity');
         if (target.def.cls) target.el.classList.remove(target.def.cls);
@@ -1964,7 +1995,7 @@ function meltIce(heldChar, target) {
 function spawnWater(x, y) {
   const el = document.createElement('div');
   el.className = 'cell-char water';
-  el.textContent = '水';
+  setCellGlyph(el, '水');
   setPos(el, x, y);
   mapEl.appendChild(el);
   state.waterCells.add(key(x, y));
@@ -2073,7 +2104,7 @@ function spawnSayChar(ch, x, y, solid = true) {
   const def = { kind: 'scene', solid, say: true };
   const el = document.createElement('div');
   el.className = 'cell-char scene say';
-  el.textContent = ch;
+  setCellGlyph(el, ch);
   setPos(el, x, y);
   mapEl.appendChild(el);
   const ent = { char: ch, x, y, kind: 'scene', solid, def, el };
@@ -2085,7 +2116,7 @@ function spawnSayChar(ch, x, y, solid = true) {
 function spawnSayBlank(x, y, extra) {
   const el = document.createElement('div');
   el.className = 'cell-char say-blank' + (extra ? ' ' + extra : '');
-  el.textContent = '_';
+  setCellGlyph(el, '_');
   setPos(el, x, y);
   mapEl.appendChild(el);
 }
@@ -2265,7 +2296,7 @@ function drillWall(target) {
     removeEntity(target);
     const el = document.createElement('div');
     el.className = 'cell-char scene hole';
-    el.textContent = '洞';
+    setCellGlyph(el, '洞');
     setPos(el, target.x, target.y);
     mapEl.appendChild(el);
     state.entities.set(key(target.x, target.y), {
@@ -2708,7 +2739,8 @@ function closeMirror() {
   $('mirror-overlay').classList.remove('show');
 }
 
-/* 镜中的行囊：所有字排成一行，最右永远站着一个金色的“我” */
+/* 镜中的行囊：所有字排成一行，最右站着金色的人称字——
+   换位前是“我”，换位后是“你” */
 function renderMirrorBag() {
   const row = $('mirror-bag');
   row.innerHTML = '';
@@ -2726,10 +2758,11 @@ function renderMirrorBag() {
     slot.onclick = () => { if (!state.mirrorBusy) convertInMirror(char); };
     row.appendChild(slot);
   });
+  const swapped = !!state.flags.mirrorSwapped;
   const me = document.createElement('div');
   me.className = 'mirror-slot mirror-self';
-  me.textContent = '我';
-  me.onclick = () => { if (!state.mirrorBusy) mirrorSwapSelf(); };
+  me.textContent = swapped ? '你' : '我';
+  me.onclick = () => { if (!state.mirrorBusy && !swapped) mirrorSwapSelf(); };
   row.appendChild(me);
 }
 
@@ -2788,7 +2821,7 @@ function mirrorSwapSelf() {
   playMirrorMorph('我', '你', () => {
     if (state.dead || state.ending) { closeMirror(); return; }
     state.flags.mirrorSwapped = true;
-    playerEl.innerHTML = '你<span id="held-char"></span>';
+    playerEl.innerHTML = '<span class="glyph">你</span><span id="held-char"></span>';
     const hc = $('held-char');
     hc.textContent = state.player.held || '';
     applyWoodColor(hc, state.player.held);
@@ -2898,7 +2931,7 @@ function spawnCharEntity(char, x, y) {
   el.className = 'cell-char ' +
     (def.kind === 'scene' ? (def.grass ? 'grass' : 'scene') : (def.chain ? 'chain' : 'entity')) +
     (def.cls ? ' ' + def.cls : '');
-  el.textContent = char;
+  setCellGlyph(el, char);
   applyWoodColor(el, char);
   setPos(el, x, y);
   mapEl.appendChild(el);
