@@ -669,12 +669,13 @@ html, body {
   text-shadow: 0 0 34px rgba(175, 205, 238, .55);
   transition: color .25s, opacity .2s;
 }
-/* 螺旋漩涡：粒子画布盖在镜面上，背后再叠一层缓慢旋转的锥形光带 */
+/* 螺旋漩涡：整字被扭曲后绘制的画布，背后再叠一层缓慢旋转的锥形光带 */
 #mirror-vortex {
   position: absolute;
   inset: 0;
   z-index: 3;
   pointer-events: none;
+  filter: drop-shadow(0 0 10px rgba(175, 205, 238, .5));
 }
 #mirror-frame::before {
   content: '';
@@ -2475,36 +2476,79 @@ function setMirrorHot(hot) {
   if (m) m.el.classList.toggle('mirror-hot', hot);
 }
 
-/* ---------- 镜中变形：把字打散成粒子，螺旋卷入镜心，再螺旋散出、聚成另一个字 ---------- */
+/* ---------- 镜中变形：直接扭曲整张字的像素，不拆成粒子 ---------- */
 
-/* 把字渲染到离屏画布，按像素透明度采样成粒子（坐标相对字心） */
-function glyphParticles(char, fontSize) {
-  const S = Math.ceil(fontSize * 1.9);
+const MORPH_RES = 0.62;   // 内部光栅分辨率（相对镜框），放大后自带一点柔化
+const TAU = Math.PI * 2, TRIG_N = 8192;
+const COS_T = new Float32Array(TRIG_N), SIN_T = new Float32Array(TRIG_N);
+for (let i = 0; i < TRIG_N; i++) {
+  const a = i * TAU / TRIG_N;
+  COS_T[i] = Math.cos(a);
+  SIN_T[i] = Math.sin(a);
+}
+/* 角度查表：把逐像素的三角函数调用降成数组取值 */
+const tcos = a => COS_T[(((a / TAU) * TRIG_N) | 0) & (TRIG_N - 1)];
+const tsin = a => SIN_T[(((a / TAU) * TRIG_N) | 0) & (TRIG_N - 1)];
+
+/* 把字画成白字透明底的位图，只取 alpha 通道用于采样 */
+function rasterGlyph(char, w, h, fontSize) {
   const cv = document.createElement('canvas');
-  cv.width = S; cv.height = S;
+  cv.width = w; cv.height = h;
   const ctx = cv.getContext('2d');
-  if (!ctx) return { pts: [], maxR: fontSize * .5 };
-
   ctx.font = `${fontSize}px "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#fff';
-  ctx.fillText(char, S / 2, S / 2 + fontSize * .02);
+  ctx.fillText(char, w / 2, h / 2 + fontSize * .02);
+  return ctx.getImageData(0, 0, w, h).data;
+}
 
-  const data = ctx.getImageData(0, 0, S, S).data;
-  const step = 4;            // 采样步长：控制粒子数量
-  const pts = [];
-  let maxR = 1;
-  for (let y = 0; y < S; y += step) {
-    for (let x = 0; x < S; x += step) {
-      if (data[(y * S + x) * 4 + 3] < 140) continue;   // 只要笔画实心处
-      const px = x - S / 2, py = y - S / 2;
-      const r = Math.hypot(px, py);
-      if (r > maxR) maxR = r;
-      pts.push({ r, a: Math.atan2(py, px) });
+/* 预先算好每个像素的极坐标（半径 / 角度 / 三联波分量），逐帧只做算术 */
+function makeWarpGeo(w, h) {
+  const n = w * h, cx = w / 2, cy = h / 2;
+  const rd = new Float32Array(n), ad = new Float32Array(n);
+  const s3 = new Float32Array(n), c3 = new Float32Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const dx = x - cx, dy = y - cy;
+      rd[i] = Math.hypot(dx, dy);
+      ad[i] = Math.atan2(dy, dx);
+      s3[i] = Math.sin(ad[i] * 3);
+      c3[i] = Math.cos(ad[i] * 3);
     }
   }
-  return { pts, maxR };
+  return { w, h, cx, cy, R: Math.hypot(cx, cy), rd, ad, s3, c3 };
+}
+
+/* 按极坐标反向重采样：半径随 shrink 收缩，越靠镜心拧得越狠（twist 为总圈数），
+   再叠一圈轻微涟漪（ripPhase）。alpha 为整张字的不透明度。 */
+function warpGlyph(src, dst, geo, twist, shrink, alpha, ripPhase) {
+  const { w, h, cx, cy, R, rd, ad, s3, c3 } = geo;
+  const dd = dst.data;
+  const cs = Math.cos(ripPhase), sn = Math.sin(ripPhase);
+  dd.fill(0);
+  for (let i = 0; i < rd.length; i++) {
+    const r0 = rd[i];
+    if (r0 < .5) continue;
+    const rip = (s3[i] * cs + c3[i] * sn) * .045;
+    const rs = (r0 / shrink) * (1 + rip);
+    if (rs > R * 1.02) continue;
+    const as = ad[i] - twist * (1 - .42 * Math.min(rs / R, 1));
+    const sx = cx + tcos(as) * rs;
+    const sy = cy + tsin(as) * rs;
+    const ix = sx | 0, iy = sy | 0;
+    if (ix < 1 || iy < 1 || ix >= w - 1 || iy >= h - 1) continue;
+    const fx = sx - ix, fy = sy - iy;
+    const i00 = (iy * w + ix) << 2;
+    const i10 = i00 + 4, i01 = i00 + (w << 2), i11 = i01 + 4;
+    const a = (src[i00 + 3] * (1 - fx) + src[i10 + 3] * fx) * (1 - fy)
+            + (src[i01 + 3] * (1 - fx) + src[i11 + 3] * fx) * fy;
+    if (a < 2) continue;
+    const o = i << 2;
+    dd[o] = 223; dd[o + 1] = 234; dd[o + 2] = 245;
+    dd[o + 3] = a * alpha;
+  }
 }
 
 /* 取消正在播放的镜中变形，并清理画布 */
@@ -2518,7 +2562,7 @@ function cancelMirrorMorph() {
   if (core) core.style.opacity = '';
 }
 
-/* 入场：原字被卷进镜心 → 镜心闪光 → 出场：新字从镜心螺旋散开聚形。
+/* 入场：原字在镜中螺旋拧紧、缩向镜心 → 镜心闪光 → 出场：新字反向拧开、落回原位。
    onDone 在整段动画结束时触发（此时核心已换成新字并带发光）。 */
 function playMirrorMorph(fromChar, toChar, onDone) {
   cancelMirrorMorph();
@@ -2526,86 +2570,60 @@ function playMirrorMorph(fromChar, toChar, onDone) {
   if (!frame || !core) { onDone && onDone(); return; }
 
   const fw = frame.clientWidth, fh = frame.clientHeight;
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.max(32, Math.round(fw * MORPH_RES));
+  const h = Math.max(32, Math.round(fh * MORPH_RES));
   const cv = document.createElement('canvas');
   cv.id = 'mirror-vortex';
-  cv.width = Math.round(fw * dpr);
-  cv.height = Math.round(fh * dpr);
+  cv.width = w; cv.height = h;
   cv.style.width = fw + 'px';
   cv.style.height = fh + 'px';
   frame.appendChild(cv);
   const ctx = cv.getContext('2d');
-  ctx.scale(dpr, dpr);
 
   frame.classList.add('morphing');
-  core.style.opacity = '0';   // 期间由粒子替代核心字
+  core.style.opacity = '0';   // 期间由被扭曲的字替代核心字
 
-  const A = glyphParticles(fromChar, 116);
-  const B = glyphParticles(toChar, 116);
-  const cx = fw / 2, cy = fh / 2;
+  const fontSize = 116 * MORPH_RES;
+  const srcA = rasterGlyph(fromChar, w, h, fontSize);
+  const srcB = rasterGlyph(toChar, w, h, fontSize);
+  const dst = ctx.createImageData(w, h);
+  const geo = makeWarpGeo(w, h);
+
   const IN = 720, HOLD = 220, OUT = 720, TOTAL = IN + HOLD + OUT;
-  const SPIN = -Math.PI * 2.15;                 // 逆时针卷过两圈多
+  const TWIST = Math.PI * 1.85;                 // 逆时针卷近两圈
   const easeIn = t => t * t * (2.2 - 1.2 * t);  // 越卷越快
   const easeOut = t => 1 - Math.pow(1 - t, 3);  // 越散越缓
   const t0 = performance.now();
   let switched = false;
 
-  const dot = (x, y, s, alpha) => {
-    ctx.fillStyle = `rgba(223, 234, 245, ${alpha.toFixed(3)})`;
-    ctx.fillRect(x - s / 2, y - s / 2, s, s);
-  };
-
-  function drawIn(t) {
-    const e = easeIn(t);
-    const fade = 1 - Math.pow(t, 4);   // 临近镜心时整体淡出
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (const p of A.pts) {
-      const k = p.r / A.maxR;
-      const theta = p.a + SPIN * e * (0.72 + 0.55 * (1 - k));   // 内外圈转速差，形成螺旋剪切
-      const x = cx + Math.cos(theta) * p.r * (1 - e);
-      const y = cy + Math.sin(theta) * p.r * (1 - e);
-      dot(x, y, 3 * (1 - .55 * e), fade * (0.45 + 0.55 * (1 - k)));
-    }
-    ctx.restore();
-  }
-
-  function drawFlash(t) {
-    const r = 6 + easeOut(t) * Math.min(fw, fh) * .55;
-    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  function flash(t) {
+    const r = 6 + easeOut(t) * Math.min(w, h) * .62;
+    const g = ctx.createRadialGradient(geo.cx, geo.cy, 0, geo.cx, geo.cy, r);
     g.addColorStop(0, `rgba(255, 255, 255, ${(0.95 * (1 - t)).toFixed(3)})`);
     g.addColorStop(.45, `rgba(198, 226, 255, ${(0.45 * (1 - t)).toFixed(3)})`);
     g.addColorStop(1, 'rgba(160, 200, 255, 0)');
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, fw, fh);
-  }
-
-  function drawOut(t) {
-    if (!switched) { switched = true; core.textContent = toChar; }
-    const e = easeOut(t);
-    /* 末段让真实的新字淡入，粒子同时淡出，避免交接处跳变 */
-    core.style.opacity = String(Math.max(0, (t - .62) / .38).toFixed(3));
-    const fade = Math.min(1, (1 - t) / .35);
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (const p of B.pts) {
-      const theta = p.a + SPIN * (1 - e) * 0.5;
-      const x = cx + Math.cos(theta) * p.r * e;
-      const y = cy + Math.sin(theta) * p.r * e;
-      dot(x, y, 1.4 + 1.6 * e, fade);
-    }
-    ctx.restore();
+    ctx.fillRect(0, 0, w, h);
   }
 
   const step = now => {
     const el = now - t0;
-    ctx.clearRect(0, 0, fw, fh);
     if (el < IN) {
-      drawIn(el / IN);
+      const p = el / IN, e = easeIn(p);
+      /* 越卷越快、越缩越小，末段略微压暗 */
+      warpGlyph(srcA, dst, geo, TWIST * e, 1 - .86 * e, 1 - .72 * p * p * p, p * 6);
+      ctx.putImageData(dst, 0, 0);
     } else if (el < IN + HOLD) {
-      drawFlash((el - IN) / HOLD);
+      ctx.clearRect(0, 0, w, h);
+      flash((el - IN) / HOLD);
     } else if (el < TOTAL) {
-      drawOut((el - IN - HOLD) / OUT);
+      const p = (el - IN - HOLD) / OUT, e = easeOut(p);
+      if (!switched) { switched = true; core.textContent = toChar; }
+      /* 从镜心拧开、放大；末段让真实的新字淡入，避免交接处跳变 */
+      const alpha = Math.min(1, p * 5) * Math.min(1, (1 - p) / .3);
+      warpGlyph(srcB, dst, geo, TWIST * (1 - e) * .9, .14 + .86 * e, Math.max(0, alpha), 0);
+      ctx.putImageData(dst, 0, 0);
+      core.style.opacity = String(Math.max(0, (p - .62) / .38).toFixed(3));
     } else {
       cancelMirrorMorph();
       core.textContent = toChar;
