@@ -621,7 +621,7 @@ html, body {
   0%, 100% { text-shadow: 0 0 8px rgba(150, 195, 235, .35); }
   50%      { text-shadow: 0 0 20px rgba(170, 210, 245, .75); }
 }
-.cell-char.mirror.mirror-frozen { color: #d3e9f4; animation: none; text-shadow: 0 0 18px rgba(205, 238, 255, .6); }
+.cell-char.mirror.mirror-fogged { color: #d3e9f4; animation: none; text-shadow: 0 0 18px rgba(205, 238, 255, .6); }
 .cell-char.mirror.mirror-hot { color: #ffab84; animation: none; text-shadow: 0 0 22px rgba(255, 110, 60, .85); }
 
 /* ---------- 镜的全屏界面 ---------- */
@@ -1031,8 +1031,8 @@ const LEVELS = [
       '墙.........冰.墙',
       '墙墙墙墙墙墙墙墙墙墙墙墙墙',
     ],
-    intro: '镜室。屋子比前两间都冷。“镜”立在北面，镜面却结着一层薄冰，照不出人。屋里有一束“日”、一段“木”，角落里一块“冰”泛着白。东墙那扇“门”，纹丝不动。',
-    mirrorFrozen: true,   // 镜面结冰：得先给它一点“日”头
+    intro: '镜室。屋子比前两间都冷。“镜”立在北面，镜面蒙着一层白雾，照不出人。屋里有一束“日”、一段“木”，角落里一块“冰”泛着白。东墙那扇“门”，纹丝不动。',
+    mirrorFogged: true,   // 镜面蒙雾：得先给它一点“日”头
     iceRelease: '关',     // 这块冰里沉着“关”，没有墙里的“声”
     doorLock: true,       // 拿着“开”，门才开
   },
@@ -1165,9 +1165,9 @@ function buildMap() {
       setPos(el, x, y);
       mapEl.appendChild(el);
       const ent = { char: ch, x, y, kind: def.kind, solid: def.solid, def, el };
-      if (def.mirror) {   // 镜子：这一关开局可能结着冰
-        ent.frozen = !!state.level.mirrorFrozen;
-        if (ent.frozen) el.classList.add('mirror-frozen');
+      if (def.mirror) {   // 镜子：这一关开局可能蒙着雾
+        ent.fogged = !!state.level.mirrorFogged;
+        if (ent.fogged) el.classList.add('mirror-fogged');
       }
       if (crackedSet.has(key(x, y))) {   // 带裂缝的墙：钻头唯一能钻开的地方
         ent.cracked = true;
@@ -1446,9 +1446,11 @@ function tryMove(dx, dy) {
       return;
     }
 
-    /* 冰：撞上去先听见一声；手持“钻”会被劝住，改走温和的化冰方式 */
+    /* 冰：撞上去先听见一声；手持“钻”会被劝住，改走温和的化冰方式。
+       “日”只晒得化镜上的薄雾，晒不穿墙角这块厚冰——要更烈的热 */
     if (target.char === '冰') {
-      narrate(held === '钻'
+      if (held === '日') narrate('日头贴上去，冰面只亮了一亮——这块冰厚得晒不穿，得用更烈的热。');
+      else narrate(held === '钻'
         ? '这样似乎会破坏冰里的东西，还是采取更温和的方式吧。'
         : '冰里似乎有什么东西……');
       return;
@@ -2466,11 +2468,11 @@ function mirrorFrontCell(mirror) {
   return findSpawnCell(mirror);
 }
 
-/* 撞上镜面：结冰 / 发烫 / 可用，三种状态 */
+/* 撞上镜面：蒙雾 / 发烫 / 可用，三种状态 */
 function useMirror(mirror) {
-  if (mirror.frozen) {
-    if (state.player.held === '日') meltMirrorIce(mirror);
-    else narrate('镜面结着冰，照不出人。也许该给它一点“日”头。');
+  if (mirror.fogged) {
+    if (state.player.held === '日') clearMirrorMist(mirror);
+    else narrate('镜面蒙着一层白雾，照不出人。也许该给它一点“日”头。');
     return;
   }
   if (state.flags.mirrorHot) {
@@ -2480,13 +2482,13 @@ function useMirror(mirror) {
   openMirror(mirror);
 }
 
-/* “日”贴上冰镜：冰化成一摊可拾起的“水”，镜面照得出人了 */
-function meltMirrorIce(mirror) {
+/* “日”贴上雾镜：白雾一照就散，凝成一摊可拾起的“水”，镜面照得出人了 */
+function clearMirrorMist(mirror) {
   if (state.animating) return;
   state.animating = true;
   sfx.combine();
-  mirror.frozen = false;
-  mirror.el.classList.remove('mirror-frozen');
+  mirror.fogged = false;
+  mirror.el.classList.remove('mirror-fogged');
   mirror.el.classList.add('flash');
   later(() => {
     mirror.el.classList.remove('flash');
@@ -2496,7 +2498,7 @@ function meltMirrorIce(mirror) {
       popIn(water, cell.x, cell.y);
     }
     state.animating = false;
-    narrate('“日”贴上去，镜面的冰“咔”地裂开，化成一小摊“水”浮在镜前。镜面终于照得出人了。');
+    narrate('“日”贴上去，镜面的白雾一照就散，凝成一小摊“水”浮在镜前。镜面终于照得出人了。');
   }, 520);
 }
 
