@@ -853,6 +853,7 @@ const state = {
   dialogFor: null,
   bagOpen: false,
   animating: false,
+  skipAnim: null,        // 进行中的可跳过动画（目前是拆字）的收尾函数
   visionOpened: false,
   dead: false,
   fireSpreading: false,
@@ -1076,6 +1077,7 @@ function loadLevel(i) {
   state.step = 0;
   state.moveCount = 0;
   state.animating = false;
+  state.skipAnim = null;
   state.dead = false;
   state.fireSpreading = false;
   state.waterCells = new Set();
@@ -1389,10 +1391,37 @@ function dismantle(entity) {
   big.style.opacity = 1; big.style.transform = 'scale(1)';
   overlay.classList.add('show');
 
-  later(() => {
-    /* 原字碎裂，部件现身并横向散开 */
+  /* 这一轮拆解的计时器单独记下：跳过时只清它们，不动火、声音等其他计时 */
+  const ids = [];
+  const L = (fn, ms) => { const id = later(fn, ms); ids.push(id); return id; };
+  const n = parts.length;
+  const added = parts.map(() => false);
+  let done = false;
+
+  /* 任意键跳过：剩下的部件直接全部入包，立刻收尾 */
+  const finish = () => {
+    if (done) return;
+    done = true;
+    ids.forEach(id => { clearTimeout(id); timers.delete(id); });
+    stage.querySelectorAll('.dis-part').forEach(p => p.remove());
+    parts.forEach((c, i) => {
+      if (!added[i]) { added[i] = true; state.bag.push(c); }
+    });
+    renderBag();
+    popBagBtn();
+    overlay.classList.remove('show');
+    big.classList.remove('crack');
+    state.skipAnim = null;
+    state.animating = false;
+    completeStep('dismantle');
+  };
+  state.skipAnim = finish;
+
+  L(() => {
+    /* 原字碎裂，部件现身并横向散开；把内联样式交还回去，.crack 的过渡才能让原字迅速暗淡 */
+    big.style.opacity = '';
+    big.style.transform = '';
     big.classList.add('crack');
-    const n = parts.length;
     const partEls = parts.map((c, i) => {
       const p = document.createElement('span');
       p.className = 'dis-part';
@@ -1409,16 +1438,18 @@ function dismantle(entity) {
     });
 
     /* 部件依次飞入背包 */
-    later(() => {
+    L(() => {
       const b = bagBtn.getBoundingClientRect();
       const tp = { x: b.left + b.width / 2, y: b.top + b.height / 2 };
       partEls.forEach((p, i) => {
         const r = p.getBoundingClientRect();
-        later(() => {
+        L(() => {
           p.style.visibility = 'hidden';   // 原部件隐去，由飞行克隆体接管
           flyChar(parts[i],
             { x: r.left + r.width / 2, y: r.top + r.height / 2 },
             tp, 640, () => {
+              if (added[i]) return;        // 已经跳过收尾，就不再重复入包
+              added[i] = true;
               state.bag.push(parts[i]);
               renderBag();
               popBagBtn();
@@ -1427,12 +1458,8 @@ function dismantle(entity) {
       });
     }, 900);
 
-    /* 收尾 */
-    later(() => {
-      overlay.classList.remove('show');
-      state.animating = false;
-      completeStep('dismantle');
-    }, 900 + n * 160 + 900);
+    /* 收尾（自然播完时也走同一个 finish） */
+    L(finish, 900 + n * 160 + 900);
   }, 950);
 }
 
@@ -2251,6 +2278,10 @@ function dropChar(char, fromRect) {
   const cell = findDropCell();
   if (!cell) { sfx.bump(); narrate('四周没有空地，无处安放。'); return; }
 
+  /* 链还拴着的时候，字被扔出了那 2×2 的亮处：看不见，也够不到 */
+  const L = state.leash;
+  const lost = !!L && (cell.x < L.x1 || cell.x > L.x2 || cell.y < L.y1 || cell.y > L.y2);
+
   if (idx >= 0) state.bag.splice(idx, 1);
   if (isHeld) {
     state.player.held = null;
@@ -2278,6 +2309,13 @@ function dropChar(char, fromRect) {
       { transform: `translate(${tx}, ${ty}) scale(1)`, opacity: 1 },
     ], { duration: 360, easing: 'cubic-bezier(.2,.8,.3,1)' });
     checkSayAnswer(char, ent);   // 落进空里的字，可能正是那句话缺的答案
+    /* 藏在黑暗里的“成就”：字被扔到了链子够不到的地方 */
+    if (lost) {
+      later(() => {
+        narrate('哦不....');
+        later(() => narrate('“' + char + '”字被你扔到了你够不到的地方。'), 2000);
+      }, 2000);
+    }
   });
 
   completeStep('drop');
@@ -2341,6 +2379,9 @@ document.addEventListener('keydown', e => {
   /* R 重开本关：任何时候都生效 */
   if (k === 'r') { gotoLevel(state.levelIndex); return; }
   if (switching || state.dead) return;
+
+  /* 拆字动画进行中：任意键跳过，直接收尾 */
+  if (state.skipAnim) { state.skipAnim(); return; }
   openVision();   // 任意行动：视野自主角散开
 
   /* 对话框打开：1 拆解 / 2 拾取 / Esc 离开 */
@@ -2375,6 +2416,14 @@ $('btn-pickup').addEventListener('click', () => {
   if (ent && ent.def.pickable) { openVision(); pickUp(ent); }
 });
 $('btn-leave').addEventListener('click', () => { openVision(); closeDialog(); });
+
+/* 拆字动画中：鼠标左键 / 右键也能跳过（捕获阶段拦下，避免同时触发行囊等点击） */
+document.addEventListener('mousedown', e => {
+  if (!state.skipAnim) return;
+  state.skipAnim();
+  e.preventDefault();
+  e.stopPropagation();
+}, true);
 
 /* 点击对话框之外即关闭（行囊是常驻侧栏，只由行囊按钮收合） */
 document.addEventListener('mousedown', e => {
