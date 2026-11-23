@@ -788,19 +788,21 @@ const STEPS = [
   { key: 'bump',      flag: 'bumped',     objective: '撞一撞那棵“树”',
     enter: '很好。右方有一棵“树”。走过去，用身体撞它。' },
   { key: 'pickup',    flag: 'picked',     objective: '撞向地上的“一”',
-    enter: '没有回应。“树”是“场景字”——它只是站在那里，风景不与你交谈。再看左下方，地上躺着一个“一”。它不一样，它在等你。撞上去。' },
+    enter: ['没有回应。“树”是“场景字”——它只是站在那里，风景不与你交谈。',
+            '再看左下方，地上躺着一个“一”。它不一样，它在等你。撞上去。'] },
   { key: 'openbag',   flag: 'opened',     objective: '按 F 打开行囊',
     enter: '“一”现在是你的了。按 F，行囊会在场景右侧展开——再按一次，就收起来。' },
   { key: 'hold',      flag: 'held',       objective: '点击“一”，把它拿在手上',
     enter: '这就是行囊，你拾起的一切都在这。点一下“一”，把它拿在手上——手里拿着什么，撞上字时，便会用上什么。' },
   { key: 'combine',   flag: 'combined',   objective: '手持“一”，撞向“火”',
-    enter: '拿好了。右上方有一团“火”。拿着“一”，撞上去。' },
+    enter: '拿好了。右上方有一团“火”。拿着“一”，撞上去，别怕。' },
   { key: 'pass',      flag: 'passed',     objective: '穿过“灭”，走过去',
     enter: '“一”压住了“火”——火熄了，成了“灭”。字与字相撞，会生出新的字，这是这个世界的法则。而“灭”已经死了，死去的字拦不住你。走过去。' },
   { key: 'dismantle', flag: 'dismantled', objective: '撞向“明”，选择「拆解」',
-    enter: '看见了吗，失去力量的字连阻拦你都做不到。下方还有一个“明”——它太大，拿不动，但合体字皆可拆。撞上去，选「拆解」。' },
+    enter:['看见了吗，失去力量的字连阻拦你都做不到。',
+	'下方还有一个“明”——它太大，拿不动，但“合体字”皆可拆。'] },
   { key: 'drop',      flag: 'dropped',    objective: '右键行囊里的“日”，把它放到地上',
-    enter: '行囊里的字，对着它点右键，就能放到地上——按 G 则是放下手里那个。试试把“日”放下。' },
+    enter: '行囊里的字，对着它点右键，就能放到地上。现在来试试把“日”放下。' },
   { key: 'rejoin',    flag: 'rejoined',   objective: '手持“月”，撞向地上的“日”',
     enter: '拆得开，也拼得回。点一下行囊里的“月”，把它拿在手上，再去撞地上的“日”——部件相撞，会重新长回原来的字。' },
   { key: 'done',      flag: null,         objective: '撞向右墙的“门”，走进「空屋」',
@@ -849,7 +851,7 @@ const LEVELS = [
 
 const NARR = {
   sceneFirst: '没有回应。场景的字只是站在那里——它们是这个世界的天与地，不与你交谈，也不为你让路。',
-  entityFirst: '它等着你。这样的字是“可交互”的——面对它，你有选择。',
+  entityFirst: '它等着你。这样的字是“可交互”的——现在，把它捡起来。',
   hot: '“火”静静地烧着。空着手，你不该碰它。',
   hotHeld: c => `手持“${c}”撞向“火”——什么也没发生。也许，该换样东西。`,
   leash: '“链”猛地绷紧，把你拽了回来——这几格之外，你哪儿也去不了。',
@@ -1167,7 +1169,14 @@ function setStep(i) {
   objectiveText.textContent = s.objective;
   const bar = $('objective-bar');
   bar.classList.remove('flash'); void bar.offsetWidth; bar.classList.add('flash');
-  narrate(s.enter);
+  /* enter 可以是单句，也可以是一组分段的句子：逐句显示，等上一句打完再停一会儿 */
+  const sayLines = lines => {
+    if (!lines.length) return;
+    const [head, ...rest] = lines;
+    narrate(head);
+    if (rest.length) later(() => sayLines(rest), head.length * 32 + 2000);
+  };
+  sayLines(Array.isArray(s.enter) ? s.enter : [s.enter]);
   if (s.spawn) spawnStepEntity(s.spawn);
 }
 
