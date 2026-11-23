@@ -19,6 +19,8 @@ html, body {
   font-family: "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif;
   color: #c9c9c2;
 }
+/* 与镜中的“我”换位之后：背景化成一整张白纸 */
+body.mirror-world { background: #f4f1e8; }
 
 /* ---------- 整体舞台 ---------- */
 #stage {
@@ -1086,6 +1088,7 @@ const state = {
   mirrorEl: null,          // 当前这面镜子的实体
   mirrorWarpRaf: 0,        // 螺旋变形的动画帧句柄
   ending: false,           // 已走到终章
+  mirrorWorld: false,      // 已与镜中的“我”换位：房间倒转、背景化白
 };
 
 /* DOM 引用 */
@@ -1322,6 +1325,8 @@ function loadLevel(i) {
   state.mirrorEl = null;
   cancelMirrorMorph();
   state.ending = false;
+  state.mirrorWorld = false;
+  document.body.classList.remove('mirror-world');
 
   mapEl.querySelectorAll('.cell-char, .range-tile').forEach(el => el.remove());
   renderLevelSelect();
@@ -1337,6 +1342,7 @@ function loadLevel(i) {
     objectiveText.textContent = lv.title || lv.name || '';
     narrate(lv.intro || '');
   }
+  fit();   // 进入新关卡时恢复正立、深色背景
 }
 
 let switching = false;
@@ -2787,8 +2793,21 @@ function mirrorSwapSelf() {
     hc.textContent = state.player.held || '';
     applyWoodColor(hc, state.player.held);
     narrate('镜子里的人朝你笑了笑。你们换了位置。');
-    later(() => { if (state.mirrorOpen) closeMirror(); }, 560);
+    later(() => {
+      if (!state.mirrorOpen) return;
+      closeMirror();
+      enterMirrorWorld();
+    }, 560);
   });
+}
+
+/* 换位之后：整间屋子瞬间绕屏幕中心倒转 180°，背景变成白色 */
+function enterMirrorWorld() {
+  if (state.mirrorWorld) return;
+  state.mirrorWorld = true;
+  document.body.classList.add('mirror-world');
+  fit();   // 舞台 transform 里带上 180° 旋转，无过渡，瞬间完成
+  sfx.combine();
 }
 
 /* 门：拿着“开”撞上去，门后就是终章 */
@@ -3097,7 +3116,8 @@ document.addEventListener('contextmenu', e => e.preventDefault());
 function fit() {
   /* 宽度预算含右侧行囊（728 + 314），保证侧栏不会被挤出屏幕 */
   const s = Math.min(1, (innerWidth - 60) / 1060, (innerHeight - 60) / 720);
-  $('stage').style.transform = `translate(-50%, -50%) scale(${s})`;
+  const rot = state.mirrorWorld ? ' rotate(180deg)' : '';
+  $('stage').style.transform = `translate(-50%, -50%) scale(${s})${rot}`;
 }
 window.addEventListener('resize', fit);
 
