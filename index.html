@@ -3017,6 +3017,7 @@ function cancelMirrorMorph() {
   if (frame) frame.classList.remove('morphing');
   const core = $('mirror-core');
   if (core) core.style.opacity = '';
+  state.skipAnim = null;
 }
 
 /* 入场：原字在镜中螺旋拧紧、缩向镜心 → 镜心闪光 → 出场：新字反向拧开、落回原位。
@@ -3089,15 +3090,32 @@ function playMirrorMorph(fromChar, toChar, onDone) {
       ctx.putImageData(dst, 0, 0);
       core.style.opacity = String(Math.max(0, (p - .62) / .38).toFixed(3));
     } else {
-      cancelMirrorMorph();
-      core.textContent = toChar;
-      core.style.opacity = '';
-      onDone && onDone();
+      finish();
       return;
     }
     state.mirrorWarpRaf = requestAnimationFrame(step);
   };
+
+  /* 收尾：任何键 / 任何鼠标键都能直接跳到新字，并立即执行后续逻辑 */
+  let finished = false;
+  function finish() {
+    if (finished) return;
+    finished = true;
+    finishMirrorMorph(toChar, core, onDone);
+  }
+  state.skipAnim = finish;
+
   state.mirrorWarpRaf = requestAnimationFrame(step);
+}
+
+/* 把镜面直接落到“新字已完成”的状态，并触发 onDone */
+function finishMirrorMorph(toChar, core, onDone) {
+  cancelMirrorMorph();   // 停帧、清画布、清掉跳过回调
+  if (core) {
+    core.textContent = toChar;
+    core.style.opacity = '';
+  }
+  onDone && onDone();
 }
 
 /* 镜前的空地：优先正下方，再向左右铺开，避开主角站着的格子 */
@@ -3935,14 +3953,15 @@ document.addEventListener('keydown', e => {
   if (switching || state.dead) return;
   if (state.ending) return;
 
-  /* 镜的全屏界面：只认 Esc（翻转动画中不响应），其余按键一律忽略 */
+  /* 拆字、镜中翻字动画进行中：任意键跳过，直接收尾 */
+  if (state.skipAnim) { state.skipAnim(); return; }
+
+  /* 镜的全屏界面：只认 Esc（翻转动画结束后），其余按键一律忽略 */
   if (state.mirrorOpen) {
     if (k === 'escape' && !state.mirrorBusy) closeMirror();
     return;
   }
 
-  /* 拆字动画进行中：任意键跳过，直接收尾 */
-  if (state.skipAnim) { state.skipAnim(); return; }
   openVision();   // 任意行动：视野自主角散开
 
   /* 对话框打开：1 拆解 / 2 拾取 / Esc 离开；按移动键则收起面板、直接走开 */
@@ -3980,7 +3999,7 @@ $('btn-pickup').addEventListener('click', () => {
 });
 $('btn-leave').addEventListener('click', () => { openVision(); closeDialog(); });
 
-/* 拆字动画中：鼠标左键 / 右键也能跳过（捕获阶段拦下，避免同时触发行囊等点击） */
+/* 拆字 / 镜中翻字动画中：鼠标任意键也能跳过（捕获阶段拦下，避免同时触发行囊等点击） */
 document.addEventListener('mousedown', e => {
   if (!state.skipAnim) return;
   state.skipAnim();
