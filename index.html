@@ -393,6 +393,14 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
   letter-spacing: 1px;
   color: #b9b9ae;
 }
+/* 门口那段对话：字逐渐变红 */
+#narrative-text { transition: color 1.5s ease; }
+#narrative.deep-red #narrative-text {
+  color: #b83226;
+  text-shadow: 0 0 14px rgba(184, 50, 38, .55);
+}
+#narrative.deep-red #narr-diamond,
+#narrative.deep-red #type-cursor { color: #a3312a; }
 #narr-diamond { color: #6a6a75; margin-right: 8px; font-size: 12px; }
 #type-cursor { color: #6a6a75; animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
@@ -884,6 +892,22 @@ body.mirror-world #mirror-tip { color: #7d7768; }
   transition: opacity .42s;
 }
 #fade.show { opacity: 1; pointer-events: auto; }
+
+/* 门口第三次撞击：屏幕骤然红一下 */
+#red-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: #a81f17;
+  opacity: 0;
+  pointer-events: none;
+}
+#red-flash.show { animation: redFlash .55s ease-out; }
+@keyframes redFlash {
+  0%   { opacity: 0; }
+  18%  { opacity: .55; }
+  100% { opacity: 0; }
+}
 </style>
 </head>
 <body>
@@ -941,6 +965,7 @@ body.mirror-world #mirror-tip { color: #7d7768; }
 </div>
 
 <div id="fade"></div>
+<div id="red-flash"></div>
 
 <script>
 /* ============================================================
@@ -1440,6 +1465,8 @@ function loadLevel(i) {
   $('death-overlay').classList.remove('show');
   $('mirror-overlay').classList.remove('show');
   $('ending-overlay').classList.remove('show');
+  $('narrative').classList.remove('deep-red');
+  $('red-flash').classList.remove('show');
   $('dis-stage').querySelectorAll('.dis-part').forEach(p => p.remove());
   closeDialog();
 
@@ -1637,7 +1664,13 @@ function tryMove(dx, dy) {
     if (target.def.portal) {
       if (state.level.doorLock) {
         if (state.player.held === '开') openDoorAndEnd();
-        else narrate('门锁着。门板上浮着一个淡淡的“关”字——还差一把“开”。');
+        else if (state.flags.doorCutscene) narrate('门依然关着。');
+        else {
+          state.flags.doorHits = (state.flags.doorHits || 0) + 1;
+          if (state.flags.doorHits === 1) narrate('门撞不开。');
+          else if (state.flags.doorHits === 2) narrate('……');
+          else startDoorCutscene();
+        }
         return;
       }
       gotoLevel(state.levelIndex + 1);
@@ -1650,6 +1683,10 @@ function tryMove(dx, dy) {
       return;
     }
     if (held && tryAssemble(held, target)) return;
+    if (held === '冫' && target.char === '火') {
+      narrate('两把刷子，不足以扑灭火焰。');
+      return;
+    }
     if (target.def.hot) {
       narrate(held ? NARR.hotHeld(held) : NARR.hot);
       return;
@@ -2487,6 +2524,23 @@ function checkSayAnswer(char, ent) {
     return true;
   }
 
+  /* 镜室门口那句：“你还记得我一＿始对你说过什么吗？”答案是“开” */
+  if (state.flags.doorBlank && char === '开') {
+    state.flags.doorBlank = false;
+    sfx.combine();
+    mapEl.querySelectorAll('.say-blank-door').forEach(el => el.remove());
+    absorbIntoBlank(ent, state.flags.doorBlankPos, 'door');
+    const filled = [...state.entities.values()].find(e => e.saySlot === 'door');
+    if (filled) filled.def = { ...filled.def, pickable: false, pickableWhy: '这句话已经说出口了' };
+    later(() => {
+      $('narrative').classList.remove('deep-red');
+      state.animating = true;
+      narrate('“开”落进那句话里——你想起来了。门，开了。');
+      later(showEnding, 1600);
+    }, 560);
+    return true;
+  }
+
   return false;
 }
 
@@ -3208,6 +3262,58 @@ function exitMirrorWorld() {
   setBlackOne(false);    // 回到主世界，又看不见也摸不着了
   restoreWhiteEntities();
   fit();
+  sfx.combine();
+}
+
+/* 第三次撞门：定身对话逐句推进，文字逐渐转红，最后闪红并浮出填字句 */
+function startDoorCutscene() {
+  if (state.flags.doorCutscene) return;
+  state.flags.doorCutscene = true;
+  state.animating = true;
+  $('narrative').classList.add('deep-red');
+  narrate('你就这么着急走...?');
+  later(() => {
+    narrate('……');
+    later(() => {
+      narrate('没关系，我先....');
+      later(() => {
+        flashRed();
+        spawnDoorSentence();
+        state.animating = false;
+      }, 1000);
+    }, 2000);
+  }, 2000);
+}
+
+/* 屏幕骤然红一下 */
+function flashRed() {
+  const el = $('red-flash');
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+  later(() => el.classList.remove('show'), 700);
+}
+
+/* 房间下方的填字句：“你还记得我一＿始对你说过什么吗？”答案是“开” */
+function spawnDoorSentence() {
+  const lines = [
+    [6, ['你', '还', '记', '得', '我', '一', null, '始']],
+    [7, ['对', '你', '说', '过', '什', '么', '吗', '？']],
+  ];
+  for (const [y, chars] of lines) {
+    chars.forEach((ch, i) => {
+      const x = 1 + i;
+      const old = entityAt(x, y);
+      if (old) removeEntity(old);
+      if (ch === null) {
+        state.flags.doorBlank = true;
+        state.flags.doorBlankPos = { x, y };
+        spawnSayBlank(x, y, 'say-blank-door');
+      } else {
+        popIn(spawnSayChar(ch, x, y), x, y);
+      }
+    });
+  }
   sfx.combine();
 }
 
