@@ -307,6 +307,12 @@ body.mirror-world #player .glyph {
   0%, 100% { text-shadow: 0 0 6px rgba(216, 199, 138, .3); }
   50%      { text-shadow: 0 0 22px rgba(255, 232, 170, .9); }
 }
+/* 窗：镜中世界里的“门”，只能望，不能走 */
+.cell-char.window {
+  color: #8fa3b8;
+  animation: none;
+  text-shadow: 0 0 10px rgba(143, 163, 184, .35);
+}
 
 /* “死”去的字（灭）：失去碰撞、失去光泽。放在 .fire 之后，保证盖过火焰样式 */
 .cell-char.dead { color: #5a5a5a; opacity: .55; animation: none; }
@@ -938,6 +944,9 @@ const CHARS = {
          sub: '一面镜子，照得出字的另一面',
          pickable: false, pickableWhy: '镜子，搬不动',
          dismantle: null, dismantleWhy: '镜子，拆不开' },
+  '窗': { kind: 'entity', solid: true, cls: 'window', sub: '窗外是一片没有字的白',
+         pickable: false, pickableWhy: '窗，拿不下来',
+         dismantle: null, dismantleWhy: '窗，拆不开' },
   '日': { kind: 'entity', solid: true, sub: '一束日光，握在手里发暖',
          pickable: true,
          dismantle: ['口', '一'] },
@@ -1127,9 +1136,6 @@ function setPos(el, gx, gy) {
   el.style.setProperty('--ty', (gy * CELL) + 'px');
 }
 
-/* 主世界与镜中世界的同义字：只换显示的字，实体规则不变 */
-const MIRROR_WORLD_GLYPHS = { '墙': '镜', '镜': '墙', '门': '窗', '窗': '门' };
-
 /* 字格里的字单独包一层：镜中世界只把字本身转正，
    格子的位移、抖动、缩放动画都不受影响 */
 function setCellGlyph(el, ch) {
@@ -1140,12 +1146,7 @@ function setCellGlyph(el, ch) {
     g.className = 'glyph';
     el.appendChild(g);
   }
-  g.textContent = state.mirrorWorld && MIRROR_WORLD_GLYPHS[ch] ? MIRROR_WORLD_GLYPHS[ch] : ch;
-}
-
-/* 进出镜中世界后，把场上的字统一刷成对应世界的写法 */
-function refreshMirrorGlyphs() {
-  for (const ent of state.entities.values()) setCellGlyph(ent.el, ent.char);
+  g.textContent = ch;
 }
 
 /* 动画计时器：切关时统一清掉，避免旧关卡的延时回调污染新关卡 */
@@ -2508,15 +2509,12 @@ const MIRROR_PAIRS = {
   '天': '地', '地': '天',
 };
 
-function mirrorEntity() {
-  return [...state.entities.values()].find(e => e.def && e.def.mirror);
-}
-
-/* 镜面发烫：火就烤在镜前，镜子暂时照不出字 */
+/* 镜面发烫：火就烤在镜前，镜子暂时照不出字（镜中世界里所有墙镜一起变烫） */
 function setMirrorHot(hot) {
   state.flags.mirrorHot = hot;
-  const m = mirrorEntity();
-  if (m) m.el.classList.toggle('mirror-hot', hot);
+  for (const ent of state.entities.values()) {
+    if (ent.def && ent.def.mirror) ent.el.classList.toggle('mirror-hot', hot);
+  }
 }
 
 /* ---------- 镜中变形：直接扭曲整张字的像素，不拆成粒子 ---------- */
@@ -2876,13 +2874,47 @@ function restoreWhiteEntities() {
   state.mirrorHidden = [];
 }
 
+/* 镜中世界不是换贴图，而是把对象本身换掉：墙变成能照人的镜、镜变成墙、
+   门变成窗。退出时再整体换回去。 */
+const WORLD_SWAP = { '墙': '镜', '镜': '墙', '门': '窗', '窗': '门' };
+
+/* 把一个实体改写成另一个字：显示、样式、碰撞、交互规则一起换 */
+function recastEntity(ent, ch) {
+  const def = CHARS[ch] || genericDropDef(ch);
+  ent.char = ch;
+  ent.def = def;
+  ent.kind = def.kind;
+  ent.solid = def.solid;
+  ent.hits = 0;
+  delete ent.fogged;
+  delete ent.cracked;
+  const el = ent.el;
+  el.className = 'cell-char ' +
+    (def.kind === 'scene' ? (def.grass ? 'grass' : 'scene') : (def.chain ? 'chain' : 'entity')) +
+    (def.cls ? ' ' + def.cls : '');
+  const skin = state.level.skin && state.level.skin[ch];
+  if (skin) el.classList.add(skin);
+  setCellGlyph(el, ch);
+}
+
+/* 把所有可对换的对象整体翻面；这是对合操作，进入和退出都调它 */
+function swapWorldObjects() {
+  for (const ent of [...state.entities.values()]) {
+    const to = WORLD_SWAP[ent.char];
+    if (!to) continue;
+    recastEntity(ent, to);
+    if (to === '镜') ent.fogged = false;   // 墙上新长出来的镜不蒙雾
+  }
+  setMirrorHot(!!state.flags.mirrorHot);   // 所有镜面同步冷热外观
+}
+
 /* 换位之后：整间屋子瞬间绕屏幕中心倒转 180°，背景变成白色 */
 function enterMirrorWorld() {
   if (state.mirrorWorld) return;
   hideWhiteEntities();   // 必须在加 mirror-world 类之前，按主世界的颜色判定
   state.mirrorWorld = true;
   document.body.classList.add('mirror-world');
-  refreshMirrorGlyphs();   // 墙↔镜、门↔窗
+  swapWorldObjects();    // 墙→镜、镜→墙、门→窗（对象层面的替换）
   fit();   // 舞台 transform 里带上 180° 旋转，无过渡，瞬间完成
   sfx.combine();
 }
@@ -2892,8 +2924,8 @@ function exitMirrorWorld() {
   if (!state.mirrorWorld) return;
   state.mirrorWorld = false;
   document.body.classList.remove('mirror-world');
+  swapWorldObjects();    // 镜→墙、墙→镜、窗→门，全部换回对象
   restoreWhiteEntities();
-  refreshMirrorGlyphs();   // 字全部换回主世界的写法
   fit();
   sfx.combine();
 }
