@@ -2762,7 +2762,7 @@ function renderMirrorBag() {
   const me = document.createElement('div');
   me.className = 'mirror-slot mirror-self';
   me.textContent = swapped ? '你' : '我';
-  me.onclick = () => { if (!state.mirrorBusy && !swapped) mirrorSwapSelf(); };
+  me.onclick = () => { if (!state.mirrorBusy) mirrorSwapSelf(); };
   row.appendChild(me);
 }
 
@@ -2811,25 +2811,32 @@ function convertInMirror(char) {
   });
 }
 
-/* 彩蛋：镜子里也有一个“我”。把它拖进来，两个“我”换了位置 */
+/* 彩蛋：镜子里也有一个“我”。放进镜中，两个“我”换位；
+   换位后再把镜中的“你”放回去，便能换回“我”，屋子也随之复原 */
 function mirrorSwapSelf() {
+  const back = !!state.flags.mirrorSwapped;
+  const from = back ? '你' : '我';
+  const to = back ? '我' : '你';
   state.mirrorBusy = true;
   const core = $('mirror-core');
-  core.textContent = '我';
+  core.textContent = from;
   sfx.combine();
 
-  playMirrorMorph('我', '你', () => {
+  playMirrorMorph(from, to, () => {
     if (state.dead || state.ending) { closeMirror(); return; }
-    state.flags.mirrorSwapped = true;
-    playerEl.innerHTML = '<span class="glyph">你</span><span id="held-char"></span>';
+    state.flags.mirrorSwapped = !back;
+    playerEl.innerHTML = `<span class="glyph">${to}</span><span id="held-char"></span>`;
     const hc = $('held-char');
     hc.textContent = state.player.held || '';
     applyWoodColor(hc, state.player.held);
-    narrate('镜子里的人朝你笑了笑。你们换了位置。');
+    narrate(back
+      ? '镜子里的人朝你点了点头，你们又换回了原来的位置。'
+      : '镜子里的人朝你笑了笑。你们换了位置。');
     later(() => {
       if (!state.mirrorOpen) return;
       closeMirror();
-      enterMirrorWorld();
+      if (back) exitMirrorWorld();
+      else enterMirrorWorld();
     }, 560);
   });
 }
@@ -2840,6 +2847,15 @@ function enterMirrorWorld() {
   state.mirrorWorld = true;
   document.body.classList.add('mirror-world');
   fit();   // 舞台 transform 里带上 180° 旋转，无过渡，瞬间完成
+  sfx.combine();
+}
+
+/* 换回之后：屋子转回正立，背景恢复深色，一切回到换位之前 */
+function exitMirrorWorld() {
+  if (!state.mirrorWorld) return;
+  state.mirrorWorld = false;
+  document.body.classList.remove('mirror-world');
+  fit();
   sfx.combine();
 }
 
