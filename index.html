@@ -1662,9 +1662,8 @@ function tryMove(dx, dy) {
     if (target.kind === 'scene') { onBumpScene(target); return; }
     if (target.def.mirror) { useMirror(target); return; }
     if (target.def.portal) {
-      if (state.level.doorLock) {
-        if (state.player.held === '开') openDoorAndEnd();
-        else if (state.flags.doorCutscene) narrate('门依然关着。');
+      if (state.level.doorLock && !state.flags.doorSolved) {
+        if (state.flags.doorCutscene) narrate('门依然关着。');
         else if (!(state.flags.frostMelted && state.flags.fireOut && state.flags.bugSeen)) {
           narrate('现在还不是时候...');
         } else {
@@ -2533,6 +2532,7 @@ function checkSayAnswer(char, ent) {
   /* 镜室门口那句：“你还记得我一＿始对你说过什么吗？”答案是“开” */
   if (state.flags.doorBlank && char === '开') {
     state.flags.doorBlank = false;
+    state.flags.doorSolved = true;   // 门开了，镜中行囊也迎来“我”
     sfx.combine();
     mapEl.querySelectorAll('.say-blank-door').forEach(el => el.remove());
     absorbIntoBlank(ent, state.flags.doorBlankPos, 'door');
@@ -2540,9 +2540,7 @@ function checkSayAnswer(char, ent) {
     if (filled) filled.def = { ...filled.def, pickable: false, pickableWhy: '这句话已经说出口了' };
     later(() => {
       $('narrative').classList.remove('deep-red');
-      state.animating = true;
       narrate('“开”落进那句话里——你想起来了。门，开了。');
-      later(showEnding, 1600);
     }, 560);
     return true;
   }
@@ -3088,8 +3086,7 @@ function closeMirror() {
   $('mirror-overlay').classList.remove('show');
 }
 
-/* 镜中的行囊：所有字排成一行，最右站着金色的人称字——
-   换位前是“我”，换位后是“你” */
+/* 镜中的行囊：所有字排成一行。金色的“我/你”只在门口那句填完之后才出现 */
 function renderMirrorBag() {
   const row = $('mirror-bag');
   row.innerHTML = '';
@@ -3107,12 +3104,14 @@ function renderMirrorBag() {
     slot.onclick = () => { if (!state.mirrorBusy) convertInMirror(char); };
     row.appendChild(slot);
   });
-  const swapped = !!state.flags.mirrorSwapped;
-  const me = document.createElement('div');
-  me.className = 'mirror-slot mirror-self';
-  me.textContent = swapped ? '你' : '我';
-  me.onclick = () => { if (!state.mirrorBusy) mirrorSwapSelf(); };
-  row.appendChild(me);
+  if (state.flags.doorSolved) {
+    const swapped = !!state.flags.mirrorSwapped;
+    const me = document.createElement('div');
+    me.className = 'mirror-slot mirror-self';
+    me.textContent = swapped ? '你' : '我';
+    me.onclick = () => { if (!state.mirrorBusy) mirrorSwapSelf(); };
+    row.appendChild(me);
+  }
 }
 
 /* 放字入镜：有另一面的，螺旋变形后翻成新字；没有的，晃一圈退回行囊 */
@@ -3287,9 +3286,9 @@ function startDoorCutscene() {
         flashRed();
         spawnDoorSentence();
         state.animating = false;
-      }, 1000);
+      }, 3500);
     }, 2000);
-  }, 2000);
+  }, 5000);
 }
 
 /* 屏幕骤然红一下 */
@@ -3324,18 +3323,7 @@ function spawnDoorSentence() {
   sfx.combine();
 }
 
-/* 门：拿着“开”撞上去，门后就是终章 */
-function openDoorAndEnd() {
-  if (state.animating) return;
-  state.animating = true;
-  sfx.combine();
-  const idx = state.bag.indexOf('开');
-  if (idx >= 0) state.bag.splice(idx, 1);
-  setHeld(null);
-  narrate('“开”嵌进门里——门，开了。');
-  later(showEnding, 1800);
-}
-
+/* 终章：门后是一片白 */
 function showEnding() {
   if (state.ending) return;
   state.ending = true;
