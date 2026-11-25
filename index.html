@@ -714,6 +714,39 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
   color: #8d8d80;
   margin-top: 6px;
 }
+/* 被“鬼”抓住后：重开本关 / 回到入镜时重新逃亡 */
+#death-actions {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+#death-overlay.ghost-death-mode #death-actions { display: flex; }
+.death-btn {
+  min-width: 250px;
+  padding: 9px 20px;
+  background: rgba(20, 8, 8, .55);
+  border: 1px solid #6d3b33;
+  color: #e3cbc5;
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: 4px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.death-btn:hover {
+  border-color: #ff9a84;
+  color: #fff;
+  background: rgba(120, 40, 30, .35);
+}
+.death-btn .sub {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #a2807a;
+}
 
 /* ---------- 镜：地图上的镜子 ---------- */
 .cell-char.mirror { color: #9fc3e0; animation: mirrorGlow 3s ease-in-out infinite; }
@@ -1008,6 +1041,10 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
   <div class="death-fire" id="death-glyph">火</div>
   <div class="death-text" id="death-text">整间屋子，烧了起来。</div>
   <div class="death-hint" id="death-hint">我，没了。　按 R 重来</div>
+  <div id="death-actions">
+    <button class="death-btn" id="btn-death-restart">按 R 重开</button>
+    <button class="death-btn" id="btn-death-escape">重新逃亡<span class="sub">进度回溯到入镜一开始</span></button>
+  </div>
 </div>
 
 <div id="mirror-overlay">
@@ -1303,6 +1340,7 @@ const state = {
   frostSliding: false,     // “霜”触发的打滑位移正在进行
   ghostTimer: null,        // 镜中世界“鬼”追击的计时器
   auraCells: [],           // “神”周围八格：鬼踏进去就散
+  ghostRunStart: null,     // 入镜那一刻的主角/鬼位置，用于“重新逃亡”
   demoEnded: false,        // 开发者调用了 endDemo()：游戏已暂停
 };
 
@@ -1564,6 +1602,7 @@ function loadLevel(i) {
   state.frostSliding = false;
   state.ghostTimer = null;
   state.auraCells = [];
+  state.ghostRunStart = null;
   state.demoEnded = false;
   document.body.classList.remove('mirror-world');
 
@@ -2915,6 +2954,7 @@ function dieByFire() {
   const glyph = $('death-glyph');
   glyph.textContent = '火';
   glyph.classList.remove('ghost-death');
+  $('death-overlay').classList.remove('ghost-death-mode');
   $('death-text').textContent = '整间屋子，烧了起来。';
   $('death-hint').textContent = '我，没了。　按 R 重来';
   $('death-overlay').classList.add('show');
@@ -2935,11 +2975,52 @@ function dieByGhost() {
   const glyph = $('death-glyph');
   glyph.textContent = '鬼';
   glyph.classList.add('ghost-death');
+  $('death-overlay').classList.add('ghost-death-mode');
   $('death-text').textContent = '它贴上了你的背。';
-  $('death-hint').textContent = '我，被“鬼”吞掉了。　按 R 重来';
+  $('death-hint').textContent = '我，被“鬼”吞掉了。';
   $('death-overlay').classList.add('show');
   narrate('“鬼”贴了上来，怎么也甩不掉。');
   sfx.bump();
+}
+
+/* 鬼死局的第二个选择：退回入镜那一刻，重新开始逃亡 */
+function retryGhostEscape() {
+  if (!state.dead) return;
+  state.dead = false;
+  state.animating = false;
+  stopGhostHunt();
+  hideGodAura();
+  $('death-overlay').classList.remove('show');
+
+  const start = state.ghostRunStart;
+  if (start) {
+    /* 主角回到入镜时的格子 */
+    state.player.x = start.px;
+    state.player.y = start.py;
+    playerEl.style.transition = 'none';
+    setPos(playerEl, start.px, start.py);
+    void playerEl.offsetWidth;
+    playerEl.style.transition = 'transform .13s ease-out';
+
+    /* 鬼回到入镜时的格子 */
+    const ghost = findGhost();
+    if (ghost && start.gx !== null) {
+      state.entities.delete(key(ghost.x, ghost.y));
+      ghost.x = start.gx;
+      ghost.y = start.gy;
+      state.entities.set(key(ghost.x, ghost.y), ghost);
+      ghost.el.style.transition = 'none';
+      setPos(ghost.el, ghost.x, ghost.y);
+      void ghost.el.offsetWidth;
+      ghost.el.style.transition = '';
+    }
+  }
+
+  /* 重播“欢迎...”，三秒后重新开始追击 */
+  state.flags.ghostWelcomed = false;
+  state.flags.ghostHunt = false;
+  startGhostWelcome();
+  sfx.combine();
 }
 
 /* ============================================================
@@ -3703,6 +3784,15 @@ function enterMirrorWorld() {
   setBlackOne(true);     // 白底显形，那道纯黑的“一”可以拾取了
   fit();   // 舞台 transform 里带上 180° 旋转，无过渡，瞬间完成
   sfx.combine();
+
+  /* 记下入镜这一刻的位置：被鬼抓住后可以“重新逃亡”回到这里 */
+  const ghostNow = findGhost();
+  state.ghostRunStart = {
+    px: state.player.x, py: state.player.y,
+    gx: ghostNow ? ghostNow.x : null,
+    gy: ghostNow ? ghostNow.y : null,
+  };
+
   startGhostWelcome();   // 镜中世界：先听完“欢迎...”，三秒后鬼开始追
 }
 
@@ -4084,6 +4174,16 @@ $('btn-pickup').addEventListener('click', () => {
   if (ent && ent.def.pickable) { openVision(); pickUp(ent); }
 });
 $('btn-leave').addEventListener('click', () => { openVision(); closeDialog(); });
+
+/* 鬼死局的两个选择：重开本关 / 回到入镜那一刻重新逃亡 */
+$('btn-death-restart').addEventListener('click', () => {
+  initAudio();
+  if (state.dead) gotoLevel(state.levelIndex);
+});
+$('btn-death-escape').addEventListener('click', () => {
+  initAudio();
+  retryGhostEscape();
+});
 
 /* 拆字 / 镜中翻字动画中：鼠标任意键也能跳过（捕获阶段拦下，避免同时触发行囊等点击） */
 document.addEventListener('mousedown', e => {
