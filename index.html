@@ -18,6 +18,7 @@ html, body {
   overflow: hidden;
   font-family: "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif;
   color: #c9c9c2;
+  transition: background-color 1.05s ease;
 }
 /* 与镜中的“我”换位之后：背景化成一整张白纸 */
 body.mirror-world { background: #f4f1e8; }
@@ -38,6 +39,37 @@ body.mirror-world #bag-panel.show { transform: rotate(180deg); }
 body.mirror-world #player .glyph {
   color: #2b2b33;
   text-shadow: 0 0 10px rgba(43, 43, 51, .28);
+}
+
+/* ---------- 换位过场：整间屋子绕中心转 180° ----------
+   字与面板反向补偿同样的角度，让它们在旋转过程中始终正立 */
+#stage.turning { transition: transform 1.05s cubic-bezier(.62, .02, .22, 1); }
+body.mirror-turning .cell-char .glyph,
+body.mirror-turning #held-char,
+body.mirror-turning #objective-bar,
+body.mirror-turning #narrative {
+  transition: transform 1.05s cubic-bezier(.62, .02, .22, 1);
+}
+body.mirror-turning #bag-panel {
+  transition: transform 1.05s cubic-bezier(.62, .02, .22, 1), opacity .2s;
+}
+/* 过场期间把“转正”的方向反过来，与舞台的 180° 相互抵消 */
+body.mirror-world.mirror-turning .cell-char .glyph,
+body.mirror-world.mirror-turning #held-char,
+body.mirror-world.mirror-turning #objective-bar,
+body.mirror-world.mirror-turning #narrative {
+  transform: rotate(-180deg);
+}
+body.mirror-world.mirror-turning #bag-panel {
+  transform: translateX(10px) rotate(-180deg);
+}
+/* 过场开始的一瞬：先不带动画地把 +180 改写成等价的 -180 */
+body.mirror-turning.mirror-turn-snap .cell-char .glyph,
+body.mirror-turning.mirror-turn-snap #held-char,
+body.mirror-turning.mirror-turn-snap #objective-bar,
+body.mirror-turning.mirror-turn-snap #narrative,
+body.mirror-turning.mirror-turn-snap #bag-panel {
+  transition: none;
 }
 
 /* ---------- 整体舞台 ---------- */
@@ -1360,6 +1392,7 @@ const state = {
   ghostTimer: null,        // 镜中世界“鬼”追击的计时器
   auraCells: [],           // “神”周围八格：鬼踏进去就散
   ghostRunStart: null,     // 入镜那一刻的主角/鬼位置，用于“重新逃亡”
+  stageTurning: false,     // 正在播放 180° 换位旋转，暂时锁输入
   demoEnded: false,        // 开发者调用了 endDemo()：游戏已暂停
 };
 
@@ -1624,6 +1657,7 @@ function loadLevel(i) {
   state.ghostRunStart = null;
   state.demoEnded = false;
   document.body.classList.remove('mirror-world');
+  endStageTurn();   // 清掉可能残留的旋转过场类
 
   mapEl.querySelectorAll('.cell-char, .range-tile, .god-aura').forEach(el => el.remove());
   renderLevelSelect();
@@ -3793,15 +3827,39 @@ function killGhost(ghost) {
   }, 420);   // 等这一步滑完，让“散掉”发生在光里
 }
 
-/* 换位之后：整间屋子瞬间绕屏幕中心倒转 180°，背景变成白色 */
+/* 换位过场：整间屋子绕中心转 180°，字与面板反向补偿保持正立 */
+const STAGE_TURN_MS = 1050;
+
+function beginStageTurn(snap) {
+  const stage = $('stage');
+  state.stageTurning = true;
+  document.body.classList.add('mirror-turning');
+  stage.classList.add('turning');
+  if (snap) {
+    /* 出场时先把“转正”的 +180 瞬时写成等价的 -180，避免反向多转一圈 */
+    document.body.classList.add('mirror-turn-snap');
+    void stage.offsetWidth;
+    document.body.classList.remove('mirror-turn-snap');
+  }
+  void stage.offsetWidth;   // 先让过渡属性生效，再改变 transform
+}
+
+function endStageTurn() {
+  state.stageTurning = false;
+  document.body.classList.remove('mirror-turning', 'mirror-turn-snap');
+  $('stage').classList.remove('turning');
+}
+
+/* 换位之后：整间屋子绕屏幕中心倒转 180°，背景变成白色 */
 function enterMirrorWorld() {
   if (state.mirrorWorld) return;
   hideWhiteEntities();   // 必须在加 mirror-world 类之前，按主世界的颜色判定
+  beginStageTurn();
   state.mirrorWorld = true;
   document.body.classList.add('mirror-world');
   swapWorldObjects();    // 墙→镜、镜→墙、门→窗（对象层面的替换）
   setBlackOne(true);     // 白底显形，那道纯黑的“一”可以拾取了
-  fit();   // 舞台 transform 里带上 180° 旋转，无过渡，瞬间完成
+  fit();   // 舞台 transform 里带上 180° 旋转，由 .turning 过渡完成
   sfx.combine();
 
   /* 记下入镜这一刻的位置：被鬼抓住后可以“重新逃亡”回到这里 */
@@ -3813,6 +3871,7 @@ function enterMirrorWorld() {
   };
 
   startGhostWelcome();   // 镜中世界：先听完“欢迎...”，三秒后鬼开始追
+  later(endStageTurn, STAGE_TURN_MS + 40);
 }
 
 /* 换回之后：屋子转回正立，背景恢复深色，一切回到换位之前 */
@@ -3820,13 +3879,19 @@ function exitMirrorWorld() {
   if (!state.mirrorWorld) return;
   stopGhostHunt();
   hideGodAura();
+  state.animating = true;   // 旋转过场期间不接受移动
+  beginStageTurn(true);
   state.mirrorWorld = false;
   document.body.classList.remove('mirror-world');
   swapWorldObjects();    // 镜→墙、墙→镜、窗→门，全部换回对象
   setBlackOne(false);    // 回到主世界，又看不见也摸不着了
-  restoreWhiteEntities();
   fit();
   sfx.combine();
+  later(() => {
+    endStageTurn();
+    restoreWhiteEntities();   // 旋转结束后，纯白的锁再回到场上
+    state.animating = false;
+  }, STAGE_TURN_MS + 40);
 }
 
 /* 第三次撞门：定身对话逐句推进，文字逐渐转红，最后闪红并浮出填字句 */
@@ -3901,6 +3966,7 @@ function endDemo() {
   cancelAnimationFrame(visionRaf);
   cancelMirrorMorph();
   stopGhostHunt();
+  endStageTurn();                // 若正处在换位旋转中，收掉过渡类
 
   closeDialog();
   toggleBag(false);
@@ -4157,6 +4223,7 @@ document.addEventListener('keydown', e => {
 
   /* R 重开本关：任何时候都生效 */
   if (k === 'r') { gotoLevel(state.levelIndex); return; }
+  if (state.stageTurning) return;   // 180° 换位旋转过场：暂时锁住其他输入
   if (switching || state.dead) return;
   if (state.ending) return;
 
@@ -4193,7 +4260,10 @@ document.addEventListener('keydown', e => {
   else if (k === 'd' || k === 'arrowright') tryMove(1, 0);
 });
 
-bagBtn.addEventListener('click', () => { initAudio(); openVision(); toggleBag(); });
+bagBtn.addEventListener('click', () => {
+  if (state.stageTurning) return;
+  initAudio(); openVision(); toggleBag();
+});
 
 /* 对话框按钮：鼠标点击，与键盘 1 / 2 / Esc 等效 */
 $('btn-dismantle').addEventListener('click', () => {
