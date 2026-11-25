@@ -840,19 +840,19 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
   white-space: nowrap;
 }
 
-/* ---------- 镜中世界：镜面界面也换成白纸色 ---------- */
-body.mirror-world #mirror-overlay {
+/* ---------- 镜面界面的白纸主题：与“我 / 你”换位同步切换 ---------- */
+#mirror-overlay.mirror-white {
   background: radial-gradient(circle at 50% 42%, rgba(252, 250, 244, .98), rgba(240, 236, 226, .99) 72%);
 }
-body.mirror-world #mirror-frame {
+#mirror-overlay.mirror-white #mirror-frame {
   border-color: #c3bdac;
   background: linear-gradient(158deg, rgba(255, 255, 255, .92), rgba(242, 238, 228, .86) 46%, rgba(255, 255, 255, .9));
   box-shadow: 0 0 60px rgba(120, 110, 88, .10) inset, 0 0 44px rgba(90, 82, 62, .16), 0 0 26px rgba(150, 140, 110, .12);
 }
-body.mirror-world #mirror-frame::after {
+#mirror-overlay.mirror-white #mirror-frame::after {
   background: linear-gradient(90deg, transparent, rgba(90, 80, 55, .10), transparent);
 }
-body.mirror-world #mirror-frame::before {
+#mirror-overlay.mirror-white #mirror-frame::before {
   background: conic-gradient(from 0deg,
     transparent 0deg,
     rgba(168, 142, 70, .13) 50deg,
@@ -861,35 +861,35 @@ body.mirror-world #mirror-frame::before {
     rgba(120, 110, 80, .09) 250deg,
     transparent 320deg);
 }
-body.mirror-world #mirror-core {
+#mirror-overlay.mirror-white #mirror-core {
   color: #2b2b33;
   text-shadow: 0 0 30px rgba(80, 76, 60, .28);
 }
-body.mirror-world #mirror-vortex {
+#mirror-overlay.mirror-white #mirror-vortex {
   filter: drop-shadow(0 0 10px rgba(96, 86, 58, .38));
 }
-body.mirror-world .mirror-slot {
+#mirror-overlay.mirror-white .mirror-slot {
   color: #3b3a33;
   background: rgba(255, 255, 255, .78);
   border-color: #c9c3b2;
 }
-body.mirror-world .mirror-slot:hover {
+#mirror-overlay.mirror-white .mirror-slot:hover {
   border-color: #a8832e;
   color: #1e1d1a;
   box-shadow: 0 0 18px rgba(150, 130, 80, .28);
 }
-body.mirror-world .mirror-slot.mirror-self {
+#mirror-overlay.mirror-white .mirror-slot.mirror-self {
   border-color: #b99a45;
   color: #7a5f1f;
   background: rgba(216, 199, 138, .22);
 }
-body.mirror-world .mirror-slot.mirror-self:hover {
+#mirror-overlay.mirror-white .mirror-slot.mirror-self:hover {
   border-color: #9c7c28;
   color: #5a4510;
   box-shadow: 0 0 20px rgba(170, 140, 60, .38);
 }
-body.mirror-world .mirror-empty { color: #8a8578; }
-body.mirror-world #mirror-tip { color: #7d7768; }
+#mirror-overlay.mirror-white .mirror-empty { color: #8a8578; }
+#mirror-overlay.mirror-white #mirror-tip { color: #7d7768; }
 
 /* ---------- Demo 结束（开发者调用 endDemo()） ---------- */
 #demo-overlay {
@@ -2986,15 +2986,15 @@ function makeWarpGeo(w, h) {
 }
 
 /* 按极坐标反向重采样：半径随 shrink 收缩，越靠镜心拧得越狠（twist 为总圈数），
-   再叠一圈轻微涟漪（ripPhase）。alpha 为整张字的不透明度。 */
-function warpGlyph(src, dst, geo, twist, shrink, alpha, ripPhase) {
+   再叠一圈轻微涟漪（ripPhase）。alpha 为整张字的不透明度。
+   ink 为真时用墨色（白纸主题），否则用镜蓝（深色主题）。 */
+function warpGlyph(src, dst, geo, twist, shrink, alpha, ripPhase, ink) {
   const { w, h, cx, cy, R, rd, ad, s3, c3 } = geo;
   const dd = dst.data;
   const cs = Math.cos(ripPhase), sn = Math.sin(ripPhase);
-  /* 主世界用镜蓝，镜中世界改用墨色，白底上才看得见 */
-  const cr = state.mirrorWorld ? 43 : 223;
-  const cg = state.mirrorWorld ? 43 : 234;
-  const cb = state.mirrorWorld ? 51 : 245;
+  const cr = ink ? 43 : 223;
+  const cg = ink ? 43 : 234;
+  const cb = ink ? 51 : 245;
   dd.fill(0);
   for (let i = 0; i < rd.length; i++) {
     const r0 = rd[i];
@@ -3032,8 +3032,9 @@ function cancelMirrorMorph() {
 }
 
 /* 入场：原字在镜中螺旋拧紧、缩向镜心 → 镜心闪光 → 出场：新字反向拧开、落回原位。
-   onDone 在整段动画结束时触发（此时核心已换成新字并带发光）。 */
-function playMirrorMorph(fromChar, toChar, onDone) {
+   onDone 在整段动画结束时触发（此时核心已换成新字并带发光）。
+   opts.inkAfter / opts.onTheme：换位时在闪光之前先切到另一侧的主题色。 */
+function playMirrorMorph(fromChar, toChar, onDone, opts = {}) {
   cancelMirrorMorph();
   const frame = $('mirror-frame'), core = $('mirror-core');
   if (!frame || !core) { onDone && onDone(); return; }
@@ -3064,11 +3065,23 @@ function playMirrorMorph(fromChar, toChar, onDone) {
   const easeOut = t => 1 - Math.pow(1 - t, 3);  // 越散越缓
   const t0 = performance.now();
   let switched = false;
+  /* 镜面配色：入场沿用当前世界，闪光之前切到换位后的世界 */
+  let ink = state.mirrorWorld;
+  let themeApplied = false;
+  const inkAfter = opts.inkAfter;
+  const THEME_LEAD = 180;   // 闪光前 180ms 就开始变色
+
+  function applyTheme() {
+    if (themeApplied || inkAfter === undefined) return;
+    themeApplied = true;
+    ink = inkAfter;
+    if (opts.onTheme) opts.onTheme();
+  }
 
   function flash(t) {
     const r = 6 + easeOut(t) * Math.min(w, h) * .62;
     const g = ctx.createRadialGradient(geo.cx, geo.cy, 0, geo.cx, geo.cy, r);
-    if (state.mirrorWorld) {
+    if (ink) {
       /* 白底上改用暖金色的镜心光 */
       g.addColorStop(0, `rgba(216, 199, 138, ${(0.85 * (1 - t)).toFixed(3)})`);
       g.addColorStop(.45, `rgba(178, 156, 96, ${(0.34 * (1 - t)).toFixed(3)})`);
@@ -3084,10 +3097,12 @@ function playMirrorMorph(fromChar, toChar, onDone) {
 
   const step = now => {
     const el = now - t0;
+    /* 入场末段、闪光触发之前，先让镜面开始过渡到另一侧的颜色 */
+    if (el >= IN - THEME_LEAD) applyTheme();
     if (el < IN) {
       const p = el / IN, e = easeIn(p);
       /* 越卷越快、越缩越小，末段略微压暗 */
-      warpGlyph(srcA, dst, geo, TWIST * e, 1 - .86 * e, 1 - .72 * p * p * p, p * 6);
+      warpGlyph(srcA, dst, geo, TWIST * e, 1 - .86 * e, 1 - .72 * p * p * p, p * 6, ink);
       ctx.putImageData(dst, 0, 0);
     } else if (el < IN + HOLD) {
       ctx.clearRect(0, 0, w, h);
@@ -3097,7 +3112,7 @@ function playMirrorMorph(fromChar, toChar, onDone) {
       if (!switched) { switched = true; core.textContent = toChar; }
       /* 从镜心拧开、放大；末段让真实的新字淡入，避免交接处跳变 */
       const alpha = Math.min(1, p * 5) * Math.min(1, (1 - p) / .3);
-      warpGlyph(srcB, dst, geo, TWIST * (1 - e) * .9, .14 + .86 * e, Math.max(0, alpha), 0);
+      warpGlyph(srcB, dst, geo, TWIST * (1 - e) * .9, .14 + .86 * e, Math.max(0, alpha), 0, ink);
       ctx.putImageData(dst, 0, 0);
       core.style.opacity = String(Math.max(0, (p - .62) / .38).toFixed(3));
     } else {
@@ -3180,6 +3195,8 @@ function openMirror(mirror) {
   core.textContent = '';
   core.className = '';
   core.style.opacity = '';
+  /* 镜面主题跟随当前所在的世界：主世界深色，镜中世界白纸色 */
+  $('mirror-overlay').classList.toggle('mirror-white', state.mirrorWorld);
   $('mirror-overlay').classList.add('show');
   toggleBag(false);
   renderMirrorBag();
@@ -3383,6 +3400,8 @@ function mirrorSwapSelf() {
   playMirrorMorph(from, to, () => {
     if (state.dead || state.ending) { closeMirror(); return; }
     state.flags.mirrorSwapped = !back;
+    /* 换位完成的这一刻，镜面主题同步翻面：入镜转白纸，出镜回深色 */
+    $('mirror-overlay').classList.toggle('mirror-white', state.flags.mirrorSwapped);
     playerEl.innerHTML = `<span class="glyph">${to}</span><span id="held-char"></span>`;
     const hc = $('held-char');
     hc.textContent = state.player.held || '';
@@ -3396,6 +3415,10 @@ function mirrorSwapSelf() {
       if (back) exitMirrorWorld();
       else enterMirrorWorld();
     }, 560);
+  }, {
+    /* 入场末段、闪光之前就把镜面换成换位后的主题 */
+    inkAfter: !back,
+    onTheme: () => $('mirror-overlay').classList.toggle('mirror-white', !back),
   });
 }
 
