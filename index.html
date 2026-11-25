@@ -973,6 +973,24 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
   letter-spacing: 4px;
   color: #6a6a60;
 }
+#demo-look {
+  margin-top: 12px;
+  padding: 9px 30px;
+  background: transparent;
+  border: 1px solid #4a4231;
+  color: #cbbd8e;
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: 5px;
+  text-indent: 5px;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+#demo-look:hover {
+  border-color: #d8c78a;
+  color: #ffe9a8;
+  background: rgba(216, 199, 138, .08);
+}
 
 /* ---------- 切关黑幕 ---------- */
 #fade {
@@ -1059,6 +1077,7 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
 <div id="demo-overlay">
   <div id="demo-title">DEMO 至此结束</div>
   <div id="demo-sub">感谢试玩《字·界》</div>
+  <button id="demo-look">到处看看</button>
 </div>
 
 <script>
@@ -3892,6 +3911,18 @@ function endDemo() {
 }
 window.endDemo = endDemo;        // 挂到全局，任何地方都能调用
 
+/* Demo 结束后点“到处看看”：收起结束幕，恢复自由行动（不再推进剧情与计时） */
+function lookAroundAfterDemo() {
+  if (!state.demoEnded) return;
+  state.demoEnded = false;
+  state.animating = false;
+  state.dead = false;
+  state.frostSliding = false;
+  $('demo-overlay').classList.remove('show');
+  openVision();
+  sfx.open();
+}
+
 /* ============================================================
    十三、飞行字符 / 实体增删
    ============================================================ */
@@ -4174,6 +4205,12 @@ $('btn-pickup').addEventListener('click', () => {
   if (ent && ent.def.pickable) { openVision(); pickUp(ent); }
 });
 $('btn-leave').addEventListener('click', () => { openVision(); closeDialog(); });
+
+/* Demo 结束幕上的“到处看看” */
+$('demo-look').addEventListener('click', () => {
+  initAudio();
+  lookAroundAfterDemo();
+});
 
 /* 鬼死局的两个选择：重开本关 / 回到入镜那一刻重新逃亡 */
 $('btn-death-restart').addEventListener('click', () => {
