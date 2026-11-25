@@ -247,6 +247,12 @@ body.mirror-turning.mirror-turn-snap #bag-panel {
   animation: none;
   text-shadow: 0 0 10px rgba(255, 255, 255, .55);
 }
+/* 纯白的锁回到主世界时：和 180° 旋转同步淡入，不突然弹出 */
+@keyframes lockReturn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.cell-char.tint-white.lock-return { animation: lockReturn 1.05s ease; }
 /* 纯黑的“一”：主世界看不见，镜中世界的白底上才显形 */
 .cell-char.void-one {
   visibility: hidden;
@@ -3601,6 +3607,10 @@ function restoreWhiteEntities() {
     const k = key(ent.x, ent.y);
     if (state.entities.has(k)) { ent.el.remove(); continue; }   // 格子已被别的东西占住
     ent.el.style.display = '';
+    /* 与出镜旋转同步淡入，避免纯白字“啪”地出现 */
+    ent.el.classList.remove('lock-return');
+    void ent.el.offsetWidth;
+    ent.el.classList.add('lock-return');
     state.entities.set(k, ent);
   }
   state.mirrorHidden = [];
@@ -3881,6 +3891,10 @@ function exitMirrorWorld() {
   hideGodAura();
   state.animating = true;   // 旋转过场期间不接受移动
   beginStageTurn(true);
+  /* 趁世界还是镜中主题时把纯白锁放回场上：
+     它们会和别的字一起完成转正，并同步淡入，而不是转完才突然出现 */
+  restoreWhiteEntities();
+  void $('stage').offsetWidth;   // 先记录它们 -180° 的起始朝向
   state.mirrorWorld = false;
   document.body.classList.remove('mirror-world');
   swapWorldObjects();    // 镜→墙、墙→镜、窗→门，全部换回对象
@@ -3889,7 +3903,6 @@ function exitMirrorWorld() {
   sfx.combine();
   later(() => {
     endStageTurn();
-    restoreWhiteEntities();   // 旋转结束后，纯白的锁再回到场上
     state.animating = false;
   }, STAGE_TURN_MS + 40);
 }
