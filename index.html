@@ -738,6 +738,18 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
   transition: opacity .35s;
 }
 #mirror-overlay.show { opacity: 1; pointer-events: auto; }
+/* 白纸主题层：叠在深色底上做透明度渐变，实现整屏柔和换色 */
+#mirror-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .5s ease;
+  background: radial-gradient(circle at 50% 42%, rgba(252, 250, 244, .98), rgba(240, 236, 226, .99) 72%);
+}
+#mirror-overlay.mirror-white::before { opacity: 1; }
 #mirror-frame {
   position: relative;
   width: 250px; height: 310px;
@@ -749,7 +761,19 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
   background: linear-gradient(158deg, rgba(180, 205, 228, .12), rgba(110, 122, 142, .03) 46%, rgba(180, 205, 228, .09));
   box-shadow: 0 0 60px rgba(140, 180, 220, .16) inset, 0 0 44px rgba(0, 0, 0, .75), 0 0 26px rgba(120, 165, 210, .12);
   overflow: hidden;
+  transition: border-color .45s ease, box-shadow .45s ease;
 }
+/* 镜面本体的白纸色层：随主题淡入淡出 */
+#mirror-paper {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .5s ease;
+  background: linear-gradient(158deg, rgba(255, 255, 255, .92), rgba(242, 238, 228, .86) 46%, rgba(255, 255, 255, .9));
+}
+#mirror-overlay.mirror-white #mirror-paper { opacity: 1; }
 #mirror-frame::after {
   content: '';
   position: absolute;
@@ -829,7 +853,7 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
 .mirror-slot:hover { border-color: #9fc4e8; color: #fff; box-shadow: 0 0 18px rgba(160, 200, 240, .35); transform: translateY(-3px); }
 .mirror-slot.mirror-self { border-color: #7d6a30; color: #d8c78a; background: rgba(216, 199, 138, .07); }
 .mirror-slot.mirror-self:hover { border-color: #d8c78a; color: #ffe9a8; box-shadow: 0 0 20px rgba(216, 199, 138, .45); }
-.mirror-empty { color: #4c4c46; font-size: 13px; letter-spacing: 4px; width: 180px; text-align: center; }
+.mirror-empty { color: #4c4c46; font-size: 13px; letter-spacing: 4px; width: 180px; text-align: center; transition: color .45s ease; }
 #mirror-tip {
   position: fixed;
   left: 50%; bottom: 26px;
@@ -838,15 +862,12 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
   letter-spacing: 2px;
   color: #5d6470;
   white-space: nowrap;
+  transition: color .45s ease;
 }
 
 /* ---------- 镜面界面的白纸主题：与“我 / 你”换位同步切换 ---------- */
-#mirror-overlay.mirror-white {
-  background: radial-gradient(circle at 50% 42%, rgba(252, 250, 244, .98), rgba(240, 236, 226, .99) 72%);
-}
 #mirror-overlay.mirror-white #mirror-frame {
   border-color: #c3bdac;
-  background: linear-gradient(158deg, rgba(255, 255, 255, .92), rgba(242, 238, 228, .86) 46%, rgba(255, 255, 255, .9));
   box-shadow: 0 0 60px rgba(120, 110, 88, .10) inset, 0 0 44px rgba(90, 82, 62, .16), 0 0 26px rgba(150, 140, 110, .12);
 }
 #mirror-overlay.mirror-white #mirror-frame::after {
@@ -990,7 +1011,7 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
 </div>
 
 <div id="mirror-overlay">
-  <div id="mirror-frame"><div id="mirror-core"></div></div>
+  <div id="mirror-frame"><div id="mirror-paper"></div><div id="mirror-core"></div></div>
   <div id="mirror-bag"></div>
   <div id="mirror-tip">点击行囊里的字，放入镜中 · Esc 离开</div>
 </div>
@@ -1511,6 +1532,7 @@ function loadLevel(i) {
   $('overlay').classList.remove('show');
   $('death-overlay').classList.remove('show');
   $('mirror-overlay').classList.remove('show');
+  $('mirror-overlay').classList.remove('mirror-white');
   $('demo-overlay').classList.remove('show');
   $('narrative').classList.remove('deep-red');
   $('red-flash').classList.remove('show');
@@ -3065,17 +3087,17 @@ function playMirrorMorph(fromChar, toChar, onDone, opts = {}) {
   const easeOut = t => 1 - Math.pow(1 - t, 3);  // 越散越缓
   const t0 = performance.now();
   let switched = false;
-  /* 镜面配色：入场沿用当前世界，闪光之前切到换位后的世界 */
+  /* 镜面配色：入场沿用当前世界，闪光开始时切到换位后的世界 */
   let ink = state.mirrorWorld;
   let themeApplied = false;
+  let inkApplied = false;
   const inkAfter = opts.inkAfter;
-  const THEME_LEAD = 180;   // 闪光前 180ms 就开始变色
+  const THEME_LEAD = 260;   // 闪光前 260ms 就让界面开始渐变
 
   function applyTheme() {
     if (themeApplied || inkAfter === undefined) return;
     themeApplied = true;
-    ink = inkAfter;
-    if (opts.onTheme) opts.onTheme();
+    if (opts.onTheme) opts.onTheme();   // 界面先柔和渐变，字色等到闪光再切
   }
 
   function flash(t) {
@@ -3097,8 +3119,13 @@ function playMirrorMorph(fromChar, toChar, onDone, opts = {}) {
 
   const step = now => {
     const el = now - t0;
-    /* 入场末段、闪光触发之前，先让镜面开始过渡到另一侧的颜色 */
+    /* 入场末段、闪光触发之前，先让镜面 UI 开始渐变到另一侧的主题 */
     if (el >= IN - THEME_LEAD) applyTheme();
+    /* 闪光开始的一刻，画布配色同步切到新主题 */
+    if (!inkApplied && inkAfter !== undefined && el >= IN) {
+      inkApplied = true;
+      ink = inkAfter;
+    }
     if (el < IN) {
       const p = el / IN, e = easeIn(p);
       /* 越卷越快、越缩越小，末段略微压暗 */
