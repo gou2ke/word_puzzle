@@ -3555,23 +3555,36 @@ function ghostTick() {
 
   if (isInGodAura(ghost.x, ghost.y)) { killGhost(ghost); return; }
 
-  const next = ghostNextStep(ghost);
-  if (next) {
-    moveGhost(ghost, next.x, next.y);
+  const path = ghostPath(ghost);
+  if (path.length) {
+    /* 一次至少走两格；穿过沿途所有的字，落点尽量避开有字的格子 */
+    let landing = path.length - 1;
+    for (let i = 0; i < path.length; i++) {
+      const c = path[i];
+      /* 踏进“神”的光或主角所在格：当格立即结算，不再往后走 */
+      if (isInGodAura(c.x, c.y) || (c.x === state.player.x && c.y === state.player.y)) {
+        landing = i;
+        break;
+      }
+      /* 两格之后若落点有字，继续往前多走一格，不在有字的地方停下 */
+      if (i >= 1) {
+        const e = entityAt(c.x, c.y);
+        if (!e || e === ghost) { landing = i; break; }
+      }
+    }
+    const target = path[landing];
+    moveGhost(ghost, target.x, target.y);
     /* 先判光：哪怕主角正站在光里，鬼一踏进来也是先散掉 */
-    if (isInGodAura(next.x, next.y)) { killGhost(ghost); return; }
-    if (next.x === state.player.x && next.y === state.player.y) { dieByGhost(); return; }
+    if (isInGodAura(target.x, target.y)) { killGhost(ghost); return; }
+    if (target.x === state.player.x && target.y === state.player.y) { dieByGhost(); return; }
   }
   scheduleGhostTick();
 }
 
-/* 从主角出发做一次 BFS，鬼沿着距离递减的格子走一步 */
-function ghostNextStep(ghost) {
-  const passable = (x, y) => {
-    if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return false;
-    const e = entityAt(x, y);
-    return !e || e === ghost;   // 有字的格子不进，避免叠字
-  };
+/* 鬼眼里没有障碍：屋里所有格子都能走。
+   从主角出发做一次 BFS，再沿距离递减的格子连成一条到主角的完整路径。 */
+function ghostPath(ghost) {
+  const passable = (x, y) => x >= 1 && y >= 1 && x <= COLS - 2 && y <= ROWS - 2;
 
   const dist = new Map();
   dist.set(key(state.player.x, state.player.y), 0);
@@ -3587,16 +3600,24 @@ function ghostNextStep(ghost) {
     }
   }
 
-  let best = null, bestD = Infinity;
-  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    const nx = ghost.x + dx, ny = ghost.y + dy;
-    if (!passable(nx, ny)) continue;
-    const d = dist.get(key(nx, ny));
-    if (d === undefined || d >= bestD) continue;
-    bestD = d;
-    best = { x: nx, y: ny };
+  const path = [];
+  let cx = ghost.x, cy = ghost.y;
+  for (let guard = 0; guard < COLS * ROWS; guard++) {
+    let best = null, bestD = dist.get(key(cx, cy)) ?? Infinity;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cx + dx, ny = cy + dy;
+      const d = dist.get(key(nx, ny));
+      if (d === undefined || d >= bestD) continue;
+      bestD = d;
+      best = { x: nx, y: ny };
+    }
+    if (!best) break;
+    path.push(best);
+    cx = best.x;
+    cy = best.y;
+    if (cx === state.player.x && cy === state.player.y) break;
   }
-  return best;
+  return path;
 }
 
 function moveGhost(ghost, nx, ny) {
@@ -3604,7 +3625,8 @@ function moveGhost(ghost, nx, ny) {
   ghost.x = nx;
   ghost.y = ny;
   state.entities.set(key(nx, ny), ghost);
-  ghost.el.style.transition = 'transform .5s cubic-bezier(.3,.7,.35,1)';
+  /* 与踩霜同速：一格约 130ms，一次两格一步滑过去 */
+  ghost.el.style.transition = 'transform .25s cubic-bezier(.3,.8,.4,1)';
   setPos(ghost.el, nx, ny);
   tone(70, .14, 'sine', .018);
 }
@@ -3618,7 +3640,7 @@ function killGhost(ghost) {
     if (state.entities.get(key(ghost.x, ghost.y)) !== ghost) return;   // 已切关
     removeEntity(ghost);
     endDemo();
-  }, 260);
+  }, 420);   // 等这一步滑完，让“散掉”发生在光里
 }
 
 /* 换位之后：整间屋子瞬间绕屏幕中心倒转 180°，背景变成白色 */
