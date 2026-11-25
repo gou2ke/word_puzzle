@@ -1114,6 +1114,10 @@ const CHARS = {
   '神': { kind: 'entity', solid: true, cls: 'god', sub: '一座金色的神像，低眉不语',
          pickable: false, pickableWhy: '神像，搬不动',
          dismantle: null, dismantleWhy: '神像，拆不开' },
+  /* 纯白的锁：主世界围着“神”，进镜中世界后随纯白字一起消失 */
+  '锁': { kind: 'entity', solid: true, cls: 'tint-white', sub: '一把纯白的锁，锁着“神”',
+         pickable: false, pickableWhy: '锁，拿不下来',
+         dismantle: null, dismantleWhy: '锁，拆不开' },
   '鬼': { kind: 'scene', solid: true, cls: 'ghost' },
 
   '门': { kind: 'entity', solid: true, cls: 'door', portal: true, sub: '门后是另一间屋子',
@@ -1225,9 +1229,9 @@ const LEVELS = [
       '墙...........墙',
       '墙..我..霜.....墙',
       '墙.日..霜地霜....门',
-      '墙.....霜.....墙',
-      '墙.........神.墙',
-      '墙...........墙',
+      '墙.....霜..锁锁锁墙',
+      '墙........锁神锁墙',
+      '墙........锁锁.墙',
       '墙墙墙墙墙墙墙墙墙墙墙墙墙',
     ],
     intro: '镜室。屋子比前两间都冷。“镜”立在北面，镜面蒙着一层白雾，照不出人。左上是“冰”，冰旁搁着一根“棍”。屋子正中，一块“地”被四面“霜”围着。东墙那扇“门”，纹丝不动。',
@@ -1705,8 +1709,15 @@ function tryMove(dx, dy) {
       return;
     }
 
+    /* 纯白的“锁”：主世界里围住“神”，靠不近 */
+    if (target.char === '锁') {
+      narrate('神像无法靠近');
+      return;
+    }
+
     if (target.char === '鬼') {
-      narrate('你撞上了一个看不见的东西。');
+      if (state.flags.ghostWelcomed) narrate('这是“鬼”，桎梏于镜中世界。');
+      else narrate('你撞上了一个看不见的东西。');
       return;
     }
 
@@ -3319,15 +3330,18 @@ function startOpenRevealCutscene() {
     clearDoorSentence();   // 房间里的填空句随之消失
     narrate('……');
     later(() => {
-      narrate('你是“我”....');
+      narrate('“你”是“我”....');
       later(() => {
-        narrate('我也是你，我们生而为一。');
+        narrate('我也是你');
         later(() => {
-          narrate('“你”想知道答案的话...');
+          narrate('我们生而为一。');
           later(() => {
-            narrate('....就来镜中看看“我”吧');
-            state.animating = false;
-          }, 2000);
+            narrate('“你”想知道答案的话...');
+            later(() => {
+              narrate('....就来镜中看看“我”吧');
+              state.animating = false;
+            }, 2000);
+          }, 3000);
         }, 3000);
       }, 3000);
     }, 2000);
