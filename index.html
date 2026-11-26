@@ -371,6 +371,29 @@ body.mirror-world .cell-char.void-one { visibility: visible; }
   animation: none;
   text-shadow: 0 0 10px rgba(143, 163, 184, .35);
 }
+/* 被红木烧穿的窗：焦黑，可以直接走过去 */
+.cell-char.window.window-burned {
+  color: #4a3b31;
+  text-shadow: 0 0 12px rgba(255, 110, 50, .18);
+}
+/* 砧：靛蓝色的铁砧 */
+.cell-char.anvil {
+  color: #646bd6;
+  animation: none;
+  text-shadow: 0 0 14px rgba(100, 107, 214, .5);
+}
+/* 门后暗室的遮幕：烧穿窗后淡出 */
+.back-room-veil {
+  position: absolute;
+  left: 0; top: 0;
+  background: #060609;
+  pointer-events: none;
+  z-index: 6;
+  transition: background-color 1.05s ease, opacity .8s ease;
+}
+/* 世界变白时，遮幕也跟着一起渐变成白纸色 */
+body.mirror-world .back-room-veil { background: #f4f1e8; }
+.back-room-veil.veil-out { opacity: 0; }
 /* 神像：金色的，安静地立在房间右下角 */
 .cell-char.god {
   color: #e8c56a;
@@ -1201,9 +1224,10 @@ const CHARS = {
          sub: '一面镜子，照得出字的另一面',
          pickable: false, pickableWhy: '镜子，搬不动',
          dismantle: null, dismantleWhy: '镜子，拆不开' },
-  '窗': { kind: 'entity', solid: true, cls: 'window', sub: '窗外是一片没有字的白',
+  '窗': { kind: 'entity', solid: true, cls: 'window', sub: '窗外一片漆黑，看不清有什么',
          pickable: false, pickableWhy: '窗，拿不下来',
-         dismantle: null, dismantleWhy: '窗，拆不开' },
+         dismantle: null, dismantleWhy: '窗，拆不开',
+         combine: { '木': { action: 'burnWindow' } } },
   '日': { kind: 'entity', solid: true, sub: '一束日光，握在手里发暖',
          pickable: true,
          dismantle: ['口', '一'] },
@@ -1223,6 +1247,14 @@ const CHARS = {
   '地': { kind: 'entity', solid: true, sub: '一块沉实的“地”，被霜围着',
          pickable: true,
          dismantle: null, dismantleWhy: '地，拆不开' },
+  '砧': { kind: 'entity', solid: true, cls: 'anvil', sub: '一方靛蓝的铁砧，沉得抬不动',
+         pickable: false, pickableWhy: '砧，抬不动',
+         dismantle: null, dismantleWhy: '砧，拆不开',
+         combine: { '金': { action: 'forge' } } },
+  '钥': { kind: 'entity', solid: true, sub: '一把刚锻好的“钥”',
+         pickable: true,
+         dismantle: null, dismantleWhy: '钥，拆不开',
+         assemble: [['钅', '月', '钥']] },
   '霜': { kind: 'scene', solid: false, cls: 'frost',
          sub: '薄薄一层霜，踩上去会打滑',
          combine: { '木': { action: 'meltFrost' } } },
@@ -1339,15 +1371,15 @@ const LEVELS = [
     short: '镜室',
     title: '镜 室',
     map: [
-      '墙墙墙墙墙墙墙墙墙墙墙墙墙',
-      '墙冰棍..镜.....鬼墙',
-      '墙...........墙',
-      '墙..我..霜.....墙',
-      '墙.日..霜地霜....门',
-      '墙.....霜..锁锁锁墙',
-      '墙........锁神锁墙',
-      '墙........锁锁.墙',
-      '墙墙墙墙墙墙墙墙墙墙墙墙墙',
+      '墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙',
+      '墙冰棍..镜.....鬼墙墙墙墙墙',
+      '墙...........墙墙墙墙墙',
+      '墙..我..霜.....墙...墙',
+      '墙.日..霜地霜....门.砧.墙',
+      '墙.....霜..锁锁锁墙...墙',
+      '墙........锁神锁墙墙墙墙墙',
+      '墙........锁锁.墙墙墙墙墙',
+      '墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙',
     ],
     intro: '镜室。屋子比前两间都冷。“镜”立在北面，镜面蒙着一层白雾，照不出人。左上是“冰”，冰旁搁着一根“棍”。屋子正中，一块“地”被四面“霜”围着。东墙那扇“门”，纹丝不动。',
     mirrorFogged: true,   // 镜面蒙雾：得先给它一点“日”头
@@ -1355,6 +1387,23 @@ const LEVELS = [
     hiddenOne: { x: 11, y: 7 },   // 右下角那道纯黑的“一”，只在镜中世界显形
     iceRelease: '关',     // 这块冰里沉着“关”，没有墙里的“声”
     doorLock: true,       // 拿着“开”，门才开
+    backRoom: { x: 13 },  // 门后被遮住的暗室（窗就是镜中世界的“门”）
+  },
+  {
+    short: '第四',
+    title: '第 四 间',
+    map: [
+      '墙墙墙墙墙墙墙墙墙墙墙墙墙',
+      '墙...........墙',
+      '墙...........墙',
+      '墙...........墙',
+      '墙.....我.....墙',
+      '墙...........墙',
+      '墙...........墙',
+      '墙...........墙',
+      '墙墙墙墙墙墙墙墙墙墙墙墙墙',
+    ],
+    intro: '第四间。屋子里空空的，一个字也没有。',
   },
 ];
 
@@ -1488,6 +1537,10 @@ function buildMap() {
   const MAP = state.level.map;
   ROWS = MAP.length;
   COLS = MAP[0].length;
+  /* 地图与叙述栏宽度随地图列数变化（第三关右侧多出暗室） */
+  mapEl.style.width = (COLS * CELL) + 'px';
+  mapEl.style.height = (ROWS * CELL) + 'px';
+  $('narrative').style.width = (COLS * CELL) + 'px';
   const crackedSet = new Set((state.level.cracked || []).map(c => key(c.x, c.y)));
 
   for (let y = 0; y < ROWS; y++) {
@@ -1530,6 +1583,18 @@ function buildMap() {
   mapEl.appendChild(playerEl);
 
   if (state.level.hiddenOne) spawnBlackOne(state.level.hiddenOne.x, state.level.hiddenOne.y);
+
+  /* 门后的暗室：先用黑幕遮住，烧穿窗后淡出 */
+  if (state.level.backRoom) {
+    const bx = state.level.backRoom.x;
+    const veil = document.createElement('div');
+    veil.className = 'back-room-veil';
+    veil.style.left = (bx * CELL) + 'px';
+    veil.style.top = '0px';
+    veil.style.width = ((COLS - bx) * CELL) + 'px';
+    veil.style.height = (ROWS * CELL) + 'px';
+    mapEl.appendChild(veil);
+  }
 }
 
 function renderLeash() {
@@ -1665,7 +1730,7 @@ function loadLevel(i) {
   document.body.classList.remove('mirror-world');
   endStageTurn();   // 清掉可能残留的旋转过场类
 
-  mapEl.querySelectorAll('.cell-char, .range-tile, .god-aura').forEach(el => el.remove());
+  mapEl.querySelectorAll('.cell-char, .range-tile, .god-aura, .back-room-veil').forEach(el => el.remove());
   renderLevelSelect();
 
   buildMap();
@@ -1783,6 +1848,11 @@ function tryMove(dx, dy) {
   const target = entityAt(nx, ny);
   if (target) {
     const held = state.player.held;
+    /* 烧穿的“窗”已经是个洞：哪怕手里还拿着木，也直接走过去 */
+    if (target.char === '窗' && !target.solid) {
+      movePlayer(nx, ny, target);
+      return;
+    }
     /* 手持配方优先：连没有碰撞箱的字（如“霜”）也要先接住配方 */
     const combo = held && target.def.combine && target.def.combine[held];
     /* “日”碰上霜：霜冻得死死的，晒不化 */
@@ -1805,6 +1875,8 @@ function tryMove(dx, dy) {
       else if (combo.action === 'meltFrost') meltFrost(held, target);
       else if (combo.action === 'axeWall') axeWall(target);
       else if (combo.action === 'drillWood') drillWood(target);
+      else if (combo.action === 'burnWindow') burnWindow(held, target);
+      else if (combo.action === 'forge') forgeMetal(target);
       return;
     }
 
@@ -1844,23 +1916,40 @@ function tryMove(dx, dy) {
     if (target.kind === 'scene') { onBumpScene(target); return; }
     if (target.def.mirror) { useMirror(target); return; }
     if (target.def.portal) {
-      if (state.level.doorLock && !state.flags.doorSolved) {
-        if (state.flags.doorCutscene) narrate('门依然关着。');
-        else if (!(state.flags.frostMelted && state.flags.fireOut && state.flags.bugSeen)) {
-          narrate('现在还不是时候...');
-        } else {
-          state.flags.doorHits = (state.flags.doorHits || 0) + 1;
-          if (state.flags.doorHits === 1) narrate('门撞不开。');
-          else if (state.flags.doorHits === 2) narrate('……');
-          else startDoorCutscene();
+      if (state.level.doorLock) {
+        const fromRight = state.player.x === target.x + 1 && state.player.y === target.y;
+        /* 从右侧（门后暗室里）用“钥”撞门：门开，通往第四关 */
+        if (held === '钥') {
+          if (fromRight) {
+            const idx = state.bag.indexOf('钥');
+            if (idx >= 0) state.bag.splice(idx, 1);
+            setHeld(null);
+            state.animating = true;
+            sfx.combine();
+            narrate('“钥”咬住锁孔，咔哒一声——门开了。门后，是另一间屋子。');
+            later(() => gotoLevel(state.levelIndex + 1), 600);
+          } else {
+            narrate('锁孔在门的另一侧。');
+          }
+          return;
         }
-        return;
-      }
-      /* 终章已移除：最后一间屋子的门不再用来通关 */
-      if (state.levelIndex >= LEVELS.length - 1) {
+        if (!state.flags.doorSolved) {
+          if (state.flags.doorCutscene) narrate('门依然关着。');
+          else if (!(state.flags.frostMelted && state.flags.fireOut && state.flags.bugSeen)) {
+            narrate('现在还不是时候...');
+          } else {
+            state.flags.doorHits = (state.flags.doorHits || 0) + 1;
+            if (state.flags.doorHits === 1) narrate('门撞不开。');
+            else if (state.flags.doorHits === 2) narrate('……');
+            else startDoorCutscene();
+          }
+          return;
+        }
         narrate('门后空空的，还没有被写下。');
         return;
       }
+      /* 其他关卡的门：直接进下一关 */
+      if (state.levelIndex >= LEVELS.length - 1) return;
       gotoLevel(state.levelIndex + 1);
       return;
     }
@@ -2494,6 +2583,76 @@ function meltFrost(heldChar, target) {
   }, 22);
 }
 
+/* 烧红的木抵上窗：窗被烧穿，门后暗室的遮幕随之淡出 */
+function burnWindow(heldChar, target) {
+  if (state.flags.windowBurned) { narrate('窗已经烧穿了。'); return; }
+  if (!state.flags.litWood) { narrate('一块冷木贴上去，窗纹丝不动。'); return; }
+  if (state.animating) return;
+  state.animating = true;
+  sfx.fire();
+
+  const P = r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  const from = P(playerEl.getBoundingClientRect());
+  const to = P(target.el.getBoundingClientRect());
+
+  setHeld(null);
+  flyChar(heldChar, from, to, 380, () => {
+    target.el.classList.add('flash');
+    later(() => {
+      target.el.classList.remove('flash');
+      state.flags.windowBurned = true;
+      target.solid = false;
+      target.el.classList.add('window-burned');
+      revealBackRoom();
+      flyChar(heldChar, to, P(playerEl.getBoundingClientRect()), 360, () => {
+        setHeld(heldChar);   // 窗很薄，木没有熄灭，仍是红的
+        state.animating = false;
+        narrate('烧红的“木”抵上“窗”，窗框哔剥一声，烧穿了一个洞。窗后，还有一小间屋子。');
+      }, 26);
+    }, 480);
+  }, 22);
+}
+
+/* 门后暗室的遮幕淡出 */
+function revealBackRoom() {
+  const veil = mapEl.querySelector('.back-room-veil');
+  if (!veil) return;
+  veil.classList.add('veil-out');
+  later(() => veil.remove(), 800);
+}
+
+/* 金撞砧：手里的“金”被锻成“钅” */
+function forgeMetal(target) {
+  if (state.animating) return;
+  state.animating = true;
+  sfx.combine();
+
+  const P = r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  const from = P(playerEl.getBoundingClientRect());
+  const to = P(target.el.getBoundingClientRect());
+
+  setHeld(null);
+  const idx = state.bag.indexOf('金');
+  if (idx >= 0) state.bag.splice(idx, 1);
+  renderBag();
+
+  flyChar('金', from, to, 360, () => {
+    target.el.classList.add('flash');
+    sfx.strike(2);
+    later(() => {
+      target.el.classList.remove('flash');
+      flyChar('钅', to, P(playerEl.getBoundingClientRect()), 380, () => {
+        state.bag.push('钅');
+        setHeld('钅');
+        renderBag();
+        popBagBtn();
+        state.animating = false;
+        narrate('“金”落在砧上，叮的一声，被锻成了“钅”。');
+      }, 26);
+    }, 420);
+  }, 22);
+}
+
 /* “地”恢复碰撞箱 */
 function solidifyEarth() {
   const earth = [...state.entities.values()].find(e => e.char === '地');
@@ -3092,6 +3251,7 @@ const MIRROR_PAIRS = {
   '关': '开', '开': '关',
   '天': '地', '地': '天',
   '冫': '丷', '丷': '冫',
+  '木': '金', '金': '木',
 };
 
 /* 镜面发烫：火就烤在镜前，镜子暂时照不出字（镜中世界里所有墙镜一起变烫） */
@@ -3646,6 +3806,11 @@ function swapWorldObjects() {
     if (!to) continue;
     recastEntity(ent, to);
     if (to === '镜') ent.fogged = false;   // 墙上新长出来的镜不蒙雾
+    /* 已经烧穿的“门→窗”：再入镜时仍是焦黑、可通行的洞 */
+    if (to === '窗' && state.flags.windowBurned) {
+      ent.solid = false;
+      ent.el.classList.add('window-burned');
+    }
   }
   setMirrorHot(!!state.flags.mirrorHot);   // 所有镜面同步冷热外观
 }
@@ -4329,8 +4494,9 @@ document.addEventListener('contextmenu', e => e.preventDefault());
    十六、窗口自适应缩放 + 启动
    ============================================================ */
 function fit() {
-  /* 宽度预算含右侧行囊（728 + 314），保证侧栏不会被挤出屏幕 */
-  const s = Math.min(1, (innerWidth - 60) / 1060, (innerHeight - 60) / 720);
+  /* 宽度预算含右侧行囊（地图宽 + 314），高度预留目标条与叙述栏 */
+  const cols = COLS || 13, rows = ROWS || 9;
+  const s = Math.min(1, (innerWidth - 60) / (cols * CELL + 332), (innerHeight - 60) / (rows * CELL + 216));
   const rot = state.mirrorWorld ? ' rotate(180deg)' : '';
   $('stage').style.transform = `translate(-50%, -50%) scale(${s})${rot}`;
 }
