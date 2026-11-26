@@ -1533,14 +1533,22 @@ const sfx = {
 /* ============================================================
    六、关卡装载
    ============================================================ */
+/* 当前应当露出的列数：门后暗室未打开时，只框住主室 */
+function visibleCols() {
+  const br = state.level && state.level.backRoom;
+  if (br && !state.flags.windowBurned) return br.x;
+  return COLS || 13;
+}
+
 function buildMap() {
   const MAP = state.level.map;
   ROWS = MAP.length;
   COLS = MAP[0].length;
-  /* 地图与叙述栏宽度随地图列数变化（第三关右侧多出暗室） */
-  mapEl.style.width = (COLS * CELL) + 'px';
+  /* 地图与叙述栏只按“已打开”的区域定宽，未开的暗室被 overflow 裁掉 */
+  const vcols = visibleCols();
+  mapEl.style.width = (vcols * CELL) + 'px';
   mapEl.style.height = (ROWS * CELL) + 'px';
-  $('narrative').style.width = (COLS * CELL) + 'px';
+  $('narrative').style.width = (vcols * CELL) + 'px';
   const crackedSet = new Set((state.level.cracked || []).map(c => key(c.x, c.y)));
 
   for (let y = 0; y < ROWS; y++) {
@@ -2603,14 +2611,23 @@ function burnWindow(heldChar, target) {
       state.flags.windowBurned = true;
       target.solid = false;
       target.el.classList.add('window-burned');
+      expandBackRoom();
       revealBackRoom();
-      flyChar(heldChar, to, P(playerEl.getBoundingClientRect()), 360, () => {
+      /* 地图刚扩展、缩放也变了，返回飞行的坐标要重新取 */
+      flyChar(heldChar, P(target.el.getBoundingClientRect()), P(playerEl.getBoundingClientRect()), 360, () => {
         setHeld(heldChar);   // 窗很薄，木没有熄灭，仍是红的
         state.animating = false;
         narrate('烧红的“木”抵上“窗”，窗框哔剥一声，烧穿了一个洞。窗后，还有一小间屋子。');
       }, 26);
     }, 480);
   }, 22);
+}
+
+/* 暗室打开：房间轮廓扩展到整张地图 */
+function expandBackRoom() {
+  mapEl.style.width = (COLS * CELL) + 'px';
+  $('narrative').style.width = (COLS * CELL) + 'px';
+  fit();
 }
 
 /* 门后暗室的遮幕淡出 */
@@ -4494,8 +4511,8 @@ document.addEventListener('contextmenu', e => e.preventDefault());
    十六、窗口自适应缩放 + 启动
    ============================================================ */
 function fit() {
-  /* 宽度预算含右侧行囊（地图宽 + 314），高度预留目标条与叙述栏 */
-  const cols = COLS || 13, rows = ROWS || 9;
+  /* 宽度预算含右侧行囊（当前可见地图宽 + 314），高度预留目标条与叙述栏 */
+  const cols = visibleCols(), rows = ROWS || 9;
   const s = Math.min(1, (innerWidth - 60) / (cols * CELL + 332), (innerHeight - 60) / (rows * CELL + 216));
   const rot = state.mirrorWorld ? ' rotate(180deg)' : '';
   $('stage').style.transform = `translate(-50%, -50%) scale(${s})${rot}`;
